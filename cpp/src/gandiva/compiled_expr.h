@@ -29,6 +29,10 @@ using EvalFunc = int (*)(uint8_t** buffers, int64_t* offsets, uint8_t** local_bi
                          const uint8_t* selection_buffer, int64_t execution_ctx_ptr,
                          int64_t record_count);
 
+using JoinEvalFunc = int (*)(uint8_t** buffers, int64_t* offsets, uint8_t** local_bitmaps,
+                            int64_t execution_ctx_ptr, int64_t build_record_count,
+                            int64_t probe_record_count, int64_t* out_record_count_ptr);
+
 /// \brief Tracks the compiled state for one expression.
 class CompiledExpr {
  public:
@@ -55,6 +59,14 @@ class CompiledExpr {
     return jit_functions_[static_cast<int>(mode)];
   }
 
+  void SetJoinJITFunction(JoinEvalFunc jit_function) {
+    join_jit_function_ = jit_function;
+  }
+
+  JoinEvalFunc GetJoinJITFunction() const {
+    return join_jit_function_;
+  }
+
  private:
   // value & validities for the expression tree (root)
   ValueValidityPairPtr value_validity_;
@@ -67,6 +79,8 @@ class CompiledExpr {
 
   // JIT functions in the generated code (set after the module is optimised and finalized)
   std::array<EvalFunc, SelectionVector::kNumModes> jit_functions_;
+
+  JoinEvalFunc join_jit_function_;
 };
 
 }  // namespace gandiva

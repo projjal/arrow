@@ -60,6 +60,9 @@ class GANDIVA_EXPORT LLVMGenerator {
     return Build(exprs, SelectionVector::Mode::MODE_NONE);
   }
 
+  Status Build(const ExpressionPtr expr, SelectionVector::Mode left_sv_mode,
+                                  SelectionVector::Mode right_sv_mode);
+  
   /// \brief Execute the built expression against the provided arguments for
   /// default mode.
   Status Execute(const arrow::RecordBatch& record_batch,
@@ -71,6 +74,11 @@ class GANDIVA_EXPORT LLVMGenerator {
                  const SelectionVector* selection_vector,
                  const ArrayDataVector& output_vector);
 
+  Status ExecuteJoin(const arrow::RecordBatch& build_batch,
+                     const arrow::RecordBatch& probe_batch,
+                     const std::shared_ptr<SelectionVector> build_selection,
+                     const std::shared_ptr<SelectionVector> probe_selection);
+
   SelectionVector::Mode selection_vector_mode() { return selection_vector_mode_; }
   LLVMTypes* types() { return engine_->types(); }
   llvm::Module* module() { return engine_->module(); }
@@ -80,6 +88,7 @@ class GANDIVA_EXPORT LLVMGenerator {
 
   FRIEND_TEST(TestLLVMGenerator, VerifyPCFunctions);
   FRIEND_TEST(TestLLVMGenerator, TestAdd);
+  FRIEND_TEST(TestLLVMGenerator, TestJoin);
   FRIEND_TEST(TestLLVMGenerator, TestNullInternal);
 
   llvm::LLVMContext* context() { return engine_->context(); }
@@ -92,6 +101,11 @@ class GANDIVA_EXPORT LLVMGenerator {
             llvm::BasicBlock* entry_block, llvm::Value* arg_addrs,
             llvm::Value* arg_local_bitmaps, std::vector<llvm::Value*> slice_offsets,
             llvm::Value* arg_context_ptr, llvm::Value* loop_var);
+
+    Visitor(LLVMGenerator* generator, llvm::Function* function,
+            llvm::BasicBlock* entry_block, llvm::Value* arg_addrs,
+            llvm::Value* arg_local_bitmaps, std::vector<llvm::Value*> slice_offsets, llvm::Value* arg_context_ptr,
+            llvm::Value* probe_index, llvm::Value* build_index);
 
     void Visit(const VectorReadValidityDex& dex) override;
     void Visit(const VectorReadFixedLenValueDex& dex) override;
@@ -164,12 +178,17 @@ class GANDIVA_EXPORT LLVMGenerator {
     std::vector<llvm::Value*> slice_offsets_;
     llvm::Value* arg_context_ptr_;
     llvm::Value* loop_var_;
+    llvm::Value* probe_index_;
+    llvm::Value* build_index_;
+    bool is_double_batch_;
     bool has_arena_allocs_;
   };
 
   // Generate the code for one expression for default mode, with the output of
   // the expression going to 'output'.
   Status Add(const ExpressionPtr expr, const FieldDescriptorPtr output);
+
+  Status AddJoin(const ExpressionPtr expr, int out_idx);
 
   /// Generate code to load the vector at specified index in the 'arg_addrs' array.
   llvm::Value* LoadVectorAtIndex(llvm::Value* arg_addrs, int idx,
@@ -181,6 +200,10 @@ class GANDIVA_EXPORT LLVMGenerator {
   /// Generate code to load the vector at specified index and cast it as data array.
   llvm::Value* GetDataReference(llvm::Value* arg_addrs, int idx, FieldPtr field);
 
+  llvm::Value* GetDataReference(llvm::Value* arg_addrs, int idx, SelectionVector::Mode sv_mode);
+
+  llvm::Value* GetDataReference(llvm::Value* arg_addrs, int idx, const std::string& name, llvm::Type* type);
+
   /// Generate code to load the vector at specified index and cast it as offsets array.
   llvm::Value* GetOffsetsReference(llvm::Value* arg_addrs, int idx, FieldPtr field);
 
@@ -191,6 +214,9 @@ class GANDIVA_EXPORT LLVMGenerator {
   Status CodeGenExprValue(DexPtr value_expr, int num_buffers, FieldDescriptorPtr output,
                           int suffix_idx, llvm::Function** fn,
                           SelectionVector::Mode selection_vector_mode);
+
+  Status NLJECodeGen(DexPtr value_expr, int num_buffers, llvm::Function** fn, int out_idx,
+                    SelectionVector::Mode left_sv_mode, SelectionVector::Mode right_sv_mode);
 
   /// Generate code to load the local bitmap specified index and cast it as bitmap.
   llvm::Value* GetLocalBitMapReference(llvm::Value* arg_bitmaps, int idx);
@@ -241,6 +267,8 @@ class GANDIVA_EXPORT LLVMGenerator {
   FunctionRegistry function_registry_;
   Annotator annotator_;
   SelectionVector::Mode selection_vector_mode_;
+  SelectionVector::Mode left_selection_vector_mode_;
+  SelectionVector::Mode right_selection_vector_mode_;
 
   // used for debug
   bool dump_ir_;

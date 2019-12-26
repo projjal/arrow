@@ -55,6 +55,10 @@ class GANDIVA_EXPORT VectorReadBaseDex : public Dex {
 
   FieldPtr Field() const { return field_desc_->field(); }
 
+  int Ordinal() const { return field_desc_->oridinal(); }
+
+  bool isMultiBatch() const { return Ordinal() < 0; } // needed ?
+
  protected:
   FieldDescriptorPtr field_desc_;
 };

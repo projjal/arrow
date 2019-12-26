@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.arrow.flatbuf.Buffer;
 import org.apache.arrow.gandiva.exceptions.GandivaException;
 import org.apache.arrow.gandiva.expression.Condition;
 import org.apache.arrow.gandiva.expression.ExpressionTree;
@@ -48,6 +49,12 @@ class BaseEvaluatorTest {
   interface BaseEvaluator {
 
     void evaluate(ArrowRecordBatch recordBatch, BufferAllocator allocator) throws GandivaException;
+
+    long getElapsedMillis();
+  }
+
+  interface JoinEvaluator {
+    void evaluate(ArrowRecordBatch leftRecordBatch, ArrowRecordBatch rightRecordBatch, BufferAllocator allocator) throws GandivaException;
 
     long getElapsedMillis();
   }
@@ -122,6 +129,37 @@ class BaseEvaluatorTest {
         elapsedTime += (finish - start);
       } finally {
         selectionBuffer.close();
+      }
+    }
+
+    @Override
+    public long getElapsedMillis() {
+      return TimeUnit.NANOSECONDS.toMillis(elapsedTime);
+    }
+  }
+
+  class NLJEvaluator implements JoinEvaluator {
+    private NestedLoopJoin nlj;
+    private long elapsedTime = 0;
+
+    public NLJEvaluator(NestedLoopJoin nlj) { this.nlj = nlj; }
+
+    @Override
+    public void evaluate(ArrowRecordBatch leftRecordBatch, ArrowRecordBatch rightRecordBatch, BufferAllocator allocator) throws GandivaException {
+      ArrowBuf leftSelectionBuffer = allocator.buffer(leftRecordBatch.getLength() * rightRecordBatch.getLength() * 2);
+      SelectionVectorInt16 leftSelectionVector= new SelectionVectorInt16(leftSelectionBuffer);
+
+      ArrowBuf rightSelectionBuffer = allocator.buffer(leftRecordBatch.getLength() * rightRecordBatch.getLength() * 4);
+      SelectionVectorInt32 rightSelectionVector= new SelectionVectorInt32(rightSelectionBuffer);
+
+      try {
+        long start = System.nanoTime();
+        nlj.evaluate(leftRecordBatch, rightRecordBatch, leftSelectionVector, rightSelectionVector);
+        long finish = System.nanoTime();
+        elapsedTime += (finish - start);
+      } finally {
+        leftSelectionBuffer.close();
+        rightSelectionBuffer.close();
       }
     }
 
@@ -349,6 +387,57 @@ class BaseEvaluatorTest {
     }
   }
 
+  private void generateDataAndEvaluateForJoin(DataAndVectorGenerator generator,
+                                       JoinEvaluator evaluator,
+                                       int numFields,
+                                       int numRows, int maxRowsInBatch,
+                                       int inputFieldSize)
+          throws GandivaException, Exception {
+    int numRemaining = numRows;
+    List<ArrowBuf> leftInputData = new ArrayList<ArrowBuf>();
+    List<ArrowFieldNode> leftFieldNodes = new ArrayList<ArrowFieldNode>();
+
+    List<ArrowBuf> rightInputData = new ArrayList<ArrowBuf>();
+    List<ArrowFieldNode> rightFieldNodes = new ArrayList<ArrowFieldNode>();
+
+    // set the bitmap
+    while (numRemaining > 0) {
+      int numRowsInBatch = maxRowsInBatch;
+      if (numRowsInBatch > numRemaining) {
+        numRowsInBatch = numRemaining;
+      }
+
+      // generate data
+      for (int i = 0; i < numFields; i++) {
+        ArrowBuf buf = allocator.buffer(numRowsInBatch * inputFieldSize);
+        ArrowBuf validity = arrowBufWithAllValid(maxRowsInBatch);
+        generateData(generator, numRowsInBatch, buf);
+
+        fieldNodes.add(new ArrowFieldNode(numRowsInBatch, 0));
+        inputData.add(validity);
+        inputData.add(buf);
+      }
+
+      // create record batches
+      ArrowRecordBatch leftRecordBatch = new ArrowRecordBatch(numRowsInBatch, leftFieldNodes, leftInputData);
+      ArrowRecordBatch rightRecordBatch = new ArrowRecordBatch(numRowsInBatch, rightFieldNodes, rightInputData);
+
+      evaluator.evaluate(leftRecordBatch, rightRecordBatch, allocator);
+
+      // fix numRemaining
+      numRemaining -= numRowsInBatch;
+
+      // release refs
+      releaseRecordBatch(leftRecordBatch);
+      releaseRecordBatch(rightRecordBatch);
+
+      leftInputData.clear();
+      rightInputData.clear();
+      leftFieldNodes.clear();
+      rightFieldNodes.clear();
+    }
+  }
+
   long timedProject(DataAndVectorGenerator generator,
       Schema schema, List<ExpressionTree> exprs,
       int numRows, int maxRowsInBatch,
@@ -380,6 +469,23 @@ class BaseEvaluatorTest {
       return evaluator.getElapsedMillis();
     } finally {
       filter.close();
+    }
+  }
+
+  long timedNestedLoopJoin(DataAndVectorGenerator generator,
+                   Schema leftSchema, Schema rightSchema, Condition condition,
+                   int leftNumRows, int maxRowsInBatch,
+                   int inputFieldSize)
+          throws GandivaException, Exception {
+
+    NestedLoopJoin nlj = NestedLoopJoin.make(leftSchema, rightSchema, condition);
+    try {
+      NLJEvaluator evaluator = new NLJEvaluator(nlj);
+      generateDataAndEvaluate(generator, evaluator,
+              schema.getFields().size(), numRows, maxRowsInBatch, inputFieldSize);
+      return evaluator.getElapsedMillis();
+    } finally {
+      nlj.close();
     }
   }
 }

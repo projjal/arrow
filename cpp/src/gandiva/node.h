@@ -98,18 +98,25 @@ class GANDIVA_EXPORT LiteralNode : public Node {
 /// \brief Node in the expression tree, representing an arrow field.
 class GANDIVA_EXPORT FieldNode : public Node {
  public:
-  explicit FieldNode(FieldPtr field) : Node(field->type()), field_(field) {}
+  explicit FieldNode(FieldPtr field) : Node(field->type()), field_(field), ordinal_(-1) {}
 
   Status Accept(NodeVisitor& visitor) const override { return visitor.Visit(*this); }
 
   const FieldPtr& field() const { return field_; }
 
   std::string ToString() const override {
-    return "(" + field()->type()->ToString() + ") " + field()->name();
+    if (ordinal_ == -1) {
+      return "(" + field()->type()->ToString() + ") " + field()->name();
+    } else {
+      return "[(" + field()->type()->ToString() + ") " + field()->name() + ", " + std::to_string(ordinal_) + "]"; 
+    }
   }
+  
+  int ordinal() const { return ordinal_; }
 
  private:
   FieldPtr field_;
+  int ordinal_;
 };
 
 /// \brief Node in the expression tree, representing a function.

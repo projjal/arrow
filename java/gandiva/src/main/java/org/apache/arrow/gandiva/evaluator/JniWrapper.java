@@ -117,4 +117,13 @@ public class JniWrapper {
    * @param moduleId moduleId that needs to be closed
    */
   native void closeFilter(long moduleId);
+
+  native long buildNLJ(byte[] leftSchemaBuf, byte[] rightSchemeBuf, byte[] conditionBuf, long configId) throws GandivaException;
+
+  native int evaluateNLJ(long moduleId, int leftNumRows, long[] leftBufAddrs, long[] leftBufSizes,
+                         int rightNumRows, long[] rightBufAddrs, long[] rightBufSizes,
+                         int leftSelectionVectorType, long leftSVBuffAddr, long leftSVBuffSize,
+                         int rightSelectionVectorType, long rightSVBuffAddr, long rightSVBuffSize);
+
+  native void closeNLJ(long moduleId);
 }

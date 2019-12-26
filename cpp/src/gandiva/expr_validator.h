@@ -46,6 +46,17 @@ class ExprValidator : public NodeVisitor {
     }
   }
 
+  explicit ExprValidator(LLVMTypes* types, SchemaPtr left_schema, SchemaPtr right_schema)
+      : types_(types), left_schema_(left_schema), right_schema_(right_schema) {
+    for (auto& field : left_schema_->fields()) {
+      multi_field_map_[std::make_pair(field->name(), 0)] = field;
+    }
+
+    for (auto& field : right_schema_->fields()) {
+      multi_field_map_[std::make_pair(field->name(), 1)] = field;
+    }
+  }
+
   /// \brief Validates the root node
   /// of an expression.
   /// 1. Data type of fields and literals.
@@ -71,9 +82,14 @@ class ExprValidator : public NodeVisitor {
   LLVMTypes* types_;
 
   SchemaPtr schema_;
+  SchemaPtr left_schema_;
+  SchemaPtr right_schema_;
 
   using FieldMap = std::unordered_map<std::string, FieldPtr, boost::hash<std::string>>;
   FieldMap field_map_;
+
+  using MultiFieldMap = std::unordered_map<std::pair<std::string, int>, FieldPtr, boost::hash<std::pair<std::string, int>>>;
+  MultiFieldMap multi_field_map_;
 };
 
 }  // namespace gandiva

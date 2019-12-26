@@ -27,6 +27,7 @@ namespace gandiva {
 
 class Projector;
 class Filter;
+class NLJ;
 
 class ProjectorHolder {
  public:
@@ -55,6 +56,21 @@ class FilterHolder {
  private:
   SchemaPtr schema_;
   std::shared_ptr<Filter> filter_;
+};
+
+class NLJHolder {
+ public:
+  NLJHolder(SchemaPtr left_schema, SchemaPtr right_schema, std::shared_ptr<NLJ> nlj)
+      : left_schema_(left_schema), right_schema_(right_schema), nlj_(std::move(nlj)) {}
+
+  SchemaPtr left_schema() { return left_schema_; }
+  SchemaPtr right_schema() { return right_schema_; }
+  std::shared_ptr<NLJ> nlj() { return nlj_; }
+
+ private:
+  SchemaPtr left_schema_;
+  SchemaPtr right_schema_;
+  std::shared_ptr<NLJ> nlj_;
 };
 
 }  // namespace gandiva

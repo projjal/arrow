@@ -20,29 +20,35 @@
 #include <memory>
 #include <string>
 
-#include "gandiva/field_descriptor.h"
+// #include "gandiva/field_descriptor.h"
 
 namespace gandiva {
 
-FieldDescriptorPtr Annotator::CheckAndAddInputFieldDescriptor(FieldPtr field) {
+FieldDescriptorPtr Annotator::CheckAndAddInputFieldDescriptor(FieldPtr field, int ordinal) {
   // If the field is already in the map, return the entry.
-  auto found = in_name_to_desc_.find(field->name());
+  auto found = in_name_to_desc_.find(std::make_pair(field->name(), ordinal));
   if (found != in_name_to_desc_.end()) {
     return found->second;
   }
 
-  auto desc = MakeDesc(field, false /*is_output*/);
-  in_name_to_desc_[field->name()] = desc;
+  auto desc = MakeDesc(field, false /*is_output*/, ordinal);
+  in_name_to_desc_[std::make_pair(field->name(), ordinal)] = desc;
   return desc;
 }
 
 FieldDescriptorPtr Annotator::AddOutputFieldDescriptor(FieldPtr field) {
-  auto desc = MakeDesc(field, true /*is_output*/);
+  auto desc = MakeDesc(field, true /*is_output*/, FieldDescriptor::kInvalidIdx);
   out_descs_.push_back(desc);
   return desc;
 }
 
-FieldDescriptorPtr Annotator::MakeDesc(FieldPtr field, bool is_output) {
+int Annotator::AddJoinOutput() {
+  out_idx_ = buffer_count_;
+  buffer_count_ += 2;
+  return out_idx_;
+}
+
+FieldDescriptorPtr Annotator::MakeDesc(FieldPtr field, bool is_output, int ordinal) {
   int data_idx = buffer_count_++;
   int validity_idx = buffer_count_++;
   int offsets_idx = FieldDescriptor::kInvalidIdx;
@@ -54,7 +60,7 @@ FieldDescriptorPtr Annotator::MakeDesc(FieldPtr field, bool is_output) {
     data_buffer_ptr_idx = buffer_count_++;
   }
   return std::make_shared<FieldDescriptor>(field, data_idx, validity_idx, offsets_idx,
-                                           data_buffer_ptr_idx);
+                                           data_buffer_ptr_idx, ordinal);
 }
 
 void Annotator::PrepareBuffersForField(const FieldDescriptor& desc,
@@ -87,6 +93,12 @@ void Annotator::PrepareBuffersForField(const FieldDescriptor& desc,
   }
 }
 
+// sv descriptor?
+void Annotator::PrepareBuffersForSV(std::shared_ptr<SelectionVector> sv, EvalBatch* eval_batch, int idx) {
+  uint8_t* buf_ptr = const_cast<uint8_t*>(sv->GetBuffer().data());
+  eval_batch->SetBuffer(idx, buf_ptr, 0 /*TODO*/);
+}
+
 EvalBatchPtr Annotator::PrepareEvalBatch(const arrow::RecordBatch& record_batch,
                                          const ArrayDataVector& out_vector) {
   EvalBatchPtr eval_batch = std::make_shared<EvalBatch>(
@@ -95,7 +107,7 @@ EvalBatchPtr Annotator::PrepareEvalBatch(const arrow::RecordBatch& record_batch,
   // Fill in the entries for the input fields.
   for (int i = 0; i < record_batch.num_columns(); ++i) {
     const std::string& name = record_batch.column_name(i);
-    auto found = in_name_to_desc_.find(name);
+    auto found = in_name_to_desc_.find(std::make_pair(name, -1));
     if (found == in_name_to_desc_.end()) {
       // skip columns not involved in the expression.
       continue;
@@ -112,6 +124,47 @@ EvalBatchPtr Annotator::PrepareEvalBatch(const arrow::RecordBatch& record_batch,
     PrepareBuffersForField(*desc, *arraydata, eval_batch.get(), true /*is_output*/);
     ++idx;
   }
+  return eval_batch;
+}
+
+EvalBatchPtr Annotator::PrepareEvalBatch(const arrow::RecordBatch& left_batch,
+                                         const arrow::RecordBatch& right_batch,
+                                         const std::shared_ptr<SelectionVector> left_selection,
+                                         const std::shared_ptr<SelectionVector> right_selection) {
+  int left_nrecords = left_batch.num_rows();
+  int right_nrecords = right_batch.num_rows();
+  int out_nrecords = left_nrecords * right_nrecords; // TODO Get this from config
+  EvalBatchPtr eval_batch = std::make_shared<EvalBatch>(
+      left_nrecords, right_nrecords, out_nrecords, buffer_count_ , local_bitmap_count_);
+
+  // prepare buffers for left_batch
+  for (int i = 0; i < left_batch.num_columns(); ++i) {
+    const std::string& name = left_batch.column_name(i);
+    auto found = in_name_to_desc_.find(std::make_pair(name, 0));
+    if (found == in_name_to_desc_.end()) {
+      // skip columns not involved in the expression.
+      continue;
+    }
+
+    PrepareBuffersForField(*(found->second), *(left_batch.column(i))->data(),
+                           eval_batch.get(), false /*is_output*/);
+  }
+
+  // prepare buffers for right_batch
+  for (int i = 0; i < right_batch.num_columns(); ++i) {
+    const std::string& name = right_batch.column_name(i);
+    auto found = in_name_to_desc_.find(std::make_pair(name, 1));
+    if (found == in_name_to_desc_.end()) {
+      // skip columns not involved in the expression.
+      continue;
+    }
+
+    PrepareBuffersForField(*(found->second), *(right_batch.column(i))->data(),
+                           eval_batch.get(), false /*is_output*/);
+  }
+
+  PrepareBuffersForSV(left_selection, eval_batch.get(), out_idx_);
+  PrepareBuffersForSV(right_selection, eval_batch.get(), out_idx_ + 1);
   return eval_batch;
 }
 

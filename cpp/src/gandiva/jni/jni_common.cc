@@ -36,6 +36,7 @@
 #include "gandiva/jni/env_helper.h"
 #include "gandiva/jni/id_to_module_map.h"
 #include "gandiva/jni/module_holder.h"
+#include "gandiva/nested_loop_join.h"
 #include "gandiva/projector.h"
 #include "gandiva/selection_vector.h"
 #include "gandiva/tree_expr_builder.h"
@@ -48,6 +49,7 @@ using gandiva::ExpressionVector;
 using gandiva::FieldPtr;
 using gandiva::FieldVector;
 using gandiva::Filter;
+using gandiva::NLJ;
 using gandiva::NodePtr;
 using gandiva::NodeVector;
 using gandiva::Projector;
@@ -60,6 +62,7 @@ using gandiva::ConfigHolder;
 using gandiva::Configuration;
 using gandiva::ConfigurationBuilder;
 using gandiva::FilterHolder;
+using gandiva::NLJHolder;
 using gandiva::ProjectorHolder;
 
 // forward declarations
@@ -81,6 +84,7 @@ static jfieldID vector_expander_ret_capacity_;
 // module maps
 gandiva::IdToModuleMap<std::shared_ptr<ProjectorHolder>> projector_modules_;
 gandiva::IdToModuleMap<std::shared_ptr<FilterHolder>> filter_modules_;
+gandiva::IdToModuleMap<std::shared_ptr<NLJHolder>> nlj_modules_;
 
 jint JNI_OnLoad(JavaVM* vm, void* reserved) {
   JNIEnv* env;
@@ -1017,4 +1021,254 @@ JNIEXPORT jint JNICALL Java_org_apache_arrow_gandiva_evaluator_JniWrapper_evalua
 JNIEXPORT void JNICALL Java_org_apache_arrow_gandiva_evaluator_JniWrapper_closeFilter(
     JNIEnv* env, jobject cls, jlong module_id) {
   filter_modules_.Erase(module_id);
+}
+
+// nlj related functions.
+void releaseNLJInput(jbyteArray left_schema_arr, jbyte* left_schema_bytes,
+                      jbyteArray right_schema_arr, jbyte* right_schema_bytes,
+                        jbyteArray condition_arr, jbyte* condition_bytes, JNIEnv* env) {
+  env->ReleaseByteArrayElements(left_schema_arr, left_schema_bytes, JNI_ABORT);
+  env->ReleaseByteArrayElements(right_schema_arr, right_schema_bytes, JNI_ABORT);
+  env->ReleaseByteArrayElements(condition_arr, condition_bytes, JNI_ABORT);
+}
+
+JNIEXPORT jlong JNICALL Java_org_apache_arrow_gandiva_evaluator_JniWrapper_buildNLJ(
+    JNIEnv* env, jobject obj, jbyteArray left_schema_arr, jbyteArray right_schema_arr, jbyteArray condition_arr,
+    jint left_selection_vector_type, jint right_selection_vector_type, jlong configuration_id) {
+  jlong module_id = 0LL;
+  std::shared_ptr<NLJ> nlj;
+  std::shared_ptr<NLJHolder> holder;
+
+  types::Schema left_schema;
+  jsize left_schema_len = env->GetArrayLength(left_schema_arr);
+  jbyte* left_schema_bytes = env->GetByteArrayElements(left_schema_arr, 0);
+
+  types::Schema right_schema;
+  jsize right_schema_len = env->GetArrayLength(right_schema_arr);
+  jbyte* right_schema_bytes = env->GetByteArrayElements(right_schema_arr, 0);
+
+  types::Condition condition;
+  jsize condition_len = env->GetArrayLength(condition_arr);
+  jbyte* condition_bytes = env->GetByteArrayElements(condition_arr, 0);
+
+  ConditionPtr condition_ptr;
+  SchemaPtr left_schema_ptr;
+  SchemaPtr right_schema_ptr;
+  gandiva::SelectionVector::Mode left_sv_mode;
+  gandiva::SelectionVector::Mode right_sv_mode;
+  gandiva::Status status;
+
+  std::shared_ptr<Configuration> config = ConfigHolder::MapLookup(configuration_id);
+  std::stringstream ss;
+
+  if (config == nullptr) {
+    ss << "configuration is mandatory.";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+  if (!ParseProtobuf(reinterpret_cast<uint8_t*>(left_schema_bytes), left_schema_len, &left_schema)) {
+    ss << "Unable to parse left schema protobuf\n";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+  if (!ParseProtobuf(reinterpret_cast<uint8_t*>(right_schema_bytes), right_schema_len, &right_schema)) {
+    ss << "Unable to parse right schema protobuf\n";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+
+  if (!ParseProtobuf(reinterpret_cast<uint8_t*>(condition_bytes), condition_len,
+                     &condition)) {
+    ss << "Unable to parse condition protobuf\n";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+  // convert types::Schema to arrow::Schema
+  left_schema_ptr = ProtoTypeToSchema(left_schema);
+  if (left_schema_ptr == nullptr) {
+    ss << "Unable to construct arrow schema object from left schema protobuf\n";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+  right_schema_ptr = ProtoTypeToSchema(right_schema);
+  if (right_schema_ptr == nullptr) {
+    ss << "Unable to construct arrow schema object from right schema protobuf\n";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+  condition_ptr = ProtoTypeToCondition(condition);
+  if (condition_ptr == nullptr) {
+    ss << "Unable to construct condition object from condition protobuf\n";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+  switch (left_selection_vector_type) {
+    case types::SV_NONE:
+      // panic?
+    case types::SV_INT16:
+      left_sv_mode = gandiva::SelectionVector::MODE_UINT16;
+      break;
+    case types::SV_INT32:
+      left_sv_mode = gandiva::SelectionVector::MODE_UINT32;
+      break;
+  }
+
+  switch (right_selection_vector_type) {
+    case types::SV_NONE:
+      // panic?
+    case types::SV_INT16:
+      right_sv_mode = gandiva::SelectionVector::MODE_UINT16;
+      break;
+    case types::SV_INT32:
+      right_sv_mode = gandiva::SelectionVector::MODE_UINT32;
+      break;
+  }
+
+  // invoke the NLJ builder now
+  status = NLJ::Make(left_schema_ptr, right_schema_ptr, condition_ptr, left_sv_mode, right_sv_mode, config, &nlj);
+  if (!status.ok()) {
+    ss << "Failed to make LLVM module due to " << status.message() << "\n";
+    releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+    goto err_out;
+  }
+
+  // store the result in a map
+  holder = std::shared_ptr<NLJHolder>(new NLJHolder(left_schema_ptr, right_schema_ptr, std::move(nlj)));
+  module_id = nlj_modules_.Insert(holder);
+  releaseNLJInput(left_schema_arr, left_schema_bytes, right_schema_arr, right_schema_bytes, condition_arr, condition_bytes, env);
+  return module_id;
+
+err_out:
+  env->ThrowNew(gandiva_exception_, ss.str().c_str());
+  return module_id;
+}
+
+JNIEXPORT jint JNICALL Java_org_apache_arrow_gandiva_evaluator_JniWrapper_evaluateNLJ(
+    JNIEnv* env, jobject cls, jlong module_id, jint left_num_rows, jlongArray left_buf_addrs_arr,
+    jlongArray left_buf_sizes_arr, jint right_num_rows, jlongArray right_buf_addrs_arr,
+    jlongArray right_buf_sizes_arr, jint jleft_selection_vector_type, jlong left_sv_buf_addr,
+    jlong left_sv_buf_size, jint jright_selection_vector_type, jlong right_sv_buf_addr,
+    jlong right_sv_buf_size) {
+  gandiva::Status status;
+  std::shared_ptr<NLJHolder> holder = nlj_modules_.Lookup(module_id);
+  if (holder == nullptr) {
+    env->ThrowNew(gandiva_exception_, "Unknown module id\n");
+    return -1;
+  }
+
+  int left_bufs_len = env->GetArrayLength(left_buf_addrs_arr);
+  if (left_bufs_len != env->GetArrayLength(left_buf_sizes_arr)) {
+    env->ThrowNew(gandiva_exception_, "mismatch in arraylen of buf_addrs and buf_sizes");
+    return -1;
+  }
+
+  jlong* left_buf_addrs = env->GetLongArrayElements(left_buf_addrs_arr, 0);
+  jlong* left_buf_sizes = env->GetLongArrayElements(left_buf_sizes_arr, 0);
+
+  int right_bufs_len = env->GetArrayLength(right_buf_addrs_arr);
+  if (right_bufs_len != env->GetArrayLength(right_buf_sizes_arr)) {
+    env->ThrowNew(gandiva_exception_, "mismatch in arraylen of buf_addrs and buf_sizes");
+    return -1;
+  }
+
+  jlong* right_buf_addrs = env->GetLongArrayElements(right_buf_addrs_arr, 0);
+  jlong* right_buf_sizes = env->GetLongArrayElements(right_buf_sizes_arr, 0);
+
+  std::shared_ptr<gandiva::SelectionVector> left_selection_vector;
+  std::shared_ptr<gandiva::SelectionVector> right_selection_vector;
+
+  do {
+    std::shared_ptr<arrow::RecordBatch> left_batch;
+    std::shared_ptr<arrow::RecordBatch> right_batch;
+
+    status = make_record_batch_with_buf_addrs(holder->left_schema(), left_num_rows, left_buf_addrs,
+                                              left_buf_sizes, left_bufs_len, &left_batch);
+    if (!status.ok()) {
+      break;
+    }
+
+    status = make_record_batch_with_buf_addrs(holder->right_schema(), right_num_rows, right_buf_addrs,
+                                              right_buf_sizes, right_bufs_len, &right_batch);
+    if (!status.ok()) {
+      break;
+    }
+
+    auto left_selection_vector_type =
+        static_cast<types::SelectionVectorType>(jleft_selection_vector_type);
+    auto left_sv_buffer = std::make_shared<arrow::MutableBuffer>(
+        reinterpret_cast<uint8_t*>(left_sv_buf_addr), left_sv_buf_size);
+    switch (left_selection_vector_type) {
+      case types::SV_INT16:
+        status =
+            gandiva::SelectionVector::MakeInt16(left_num_rows * right_num_rows, left_sv_buffer, &left_selection_vector);
+        break;
+      case types::SV_INT32:
+        status =
+            gandiva::SelectionVector::MakeInt32(left_num_rows * right_num_rows, left_sv_buffer, &left_selection_vector);
+        break;
+      default:
+        status = gandiva::Status::Invalid("unknown selection vector type");
+    }
+    if (!status.ok()) {
+      break;
+    }
+
+    auto right_selection_vector_type =
+        static_cast<types::SelectionVectorType>(jright_selection_vector_type);
+    auto right_sv_buffer = std::make_shared<arrow::MutableBuffer>(
+        reinterpret_cast<uint8_t*>(right_sv_buf_addr), right_sv_buf_size);
+    switch (right_selection_vector_type) {
+      case types::SV_INT16:
+        status =
+            gandiva::SelectionVector::MakeInt16(left_num_rows * right_num_rows, right_sv_buffer, &right_selection_vector);
+        break;
+      case types::SV_INT32:
+        status =
+            gandiva::SelectionVector::MakeInt32(left_num_rows * right_num_rows, right_sv_buffer, &right_selection_vector);
+        break;
+      default:
+        status = gandiva::Status::Invalid("unknown selection vector type");
+    }
+    if (!status.ok()) {
+      break;
+    }
+
+    status = holder->nlj()->Evaluate(*left_batch, *right_batch, left_selection_vector, right_selection_vector);
+  } while (0);
+
+  env->ReleaseLongArrayElements(left_buf_addrs_arr, left_buf_addrs, JNI_ABORT);
+  env->ReleaseLongArrayElements(left_buf_sizes_arr, left_buf_sizes, JNI_ABORT);
+  env->ReleaseLongArrayElements(right_buf_addrs_arr, right_buf_addrs, JNI_ABORT);
+  env->ReleaseLongArrayElements(right_buf_sizes_arr, right_buf_sizes, JNI_ABORT);
+
+  if (!status.ok()) {
+    std::stringstream ss;
+    ss << "Evaluate returned " << status.message() << "\n";
+    env->ThrowNew(gandiva_exception_, status.message().c_str());
+    return -1;
+  } else {
+    int64_t num_slots = left_selection_vector->GetNumSlots();
+    // Check integer overflow
+    if (num_slots > INT_MAX) {
+      std::stringstream ss;
+      ss << "The selection vector has " << num_slots
+         << " slots, which is larger than the " << INT_MAX << " limit.\n";
+      const std::string message = ss.str();
+      env->ThrowNew(gandiva_exception_, message.c_str());
+      return -1;
+    }
+    return static_cast<int>(num_slots);
+  }
+}
+
+JNIEXPORT void JNICALL Java_org_apache_arrow_gandiva_evaluator_JniWrapper_closeNLJ(
+    JNIEnv* env, jobject cls, jlong module_id) {
+  nlj_modules_.Erase(module_id);
 }

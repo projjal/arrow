@@ -90,6 +90,44 @@ Status LLVMGenerator::Build(const ExpressionVector& exprs, SelectionVector::Mode
   return Status::OK();
 }
 
+Status LLVMGenerator::AddJoin(const ExpressionPtr expr, int out_idx) {
+  // decompose the expression to separate out value and validities.
+  ExprDecomposer decomposer(function_registry_, annotator_);
+  ValueValidityPairPtr value_validity;
+  ARROW_RETURN_NOT_OK(decomposer.Decompose(*expr->root(), &value_validity));
+  // Generate the IR function for the decomposed expression.
+  std::unique_ptr<CompiledExpr> compiled_expr(new CompiledExpr(value_validity, nullptr));
+  llvm::Function* ir_function = nullptr;
+  ARROW_RETURN_NOT_OK(NLJECodeGen(value_validity->value_expr(), annotator_.buffer_count(),
+                                       &ir_function, out_idx, left_selection_vector_mode_,
+                                       right_selection_vector_mode_));
+  compiled_expr->SetIRFunction(left_selection_vector_mode_, ir_function);
+
+  compiled_exprs_.push_back(std::move(compiled_expr));
+  return Status::OK();
+}
+
+Status LLVMGenerator::Build(const ExpressionPtr expr, SelectionVector::Mode left_sv_mode,
+                                  SelectionVector::Mode right_sv_mode) {
+  left_selection_vector_mode_ = left_sv_mode;
+  right_selection_vector_mode_ = right_sv_mode;
+
+  auto out_idx= annotator_.AddJoinOutput();
+  ARROW_RETURN_NOT_OK(AddJoin(expr, out_idx));
+
+  // optimise, compile and finalize the module
+  ARROW_RETURN_NOT_OK(engine_->FinalizeModule(optimise_ir_, dump_ir_));
+
+  // setup the jit functions for each expression.
+  auto& compiled_expr = compiled_exprs_.front();
+  auto ir_function = compiled_expr->GetIRFunction(left_sv_mode); // TODO fix this
+  auto jit_function =
+      reinterpret_cast<JoinEvalFunc>(engine_->CompiledFunction(ir_function));
+  compiled_expr->SetJoinJITFunction(jit_function);
+
+  return Status::OK();
+}
+
 /// Execute the compiled module against the provided vectors.
 Status LLVMGenerator::Execute(const arrow::RecordBatch& record_batch,
                               const ArrayDataVector& output_vector) {
@@ -141,6 +179,36 @@ Status LLVMGenerator::Execute(const arrow::RecordBatch& record_batch,
   return Status::OK();
 }
 
+Status LLVMGenerator::ExecuteJoin(const arrow::RecordBatch& build_batch, const arrow::RecordBatch& probe_batch,
+                                  const std::shared_ptr<SelectionVector> build_selection,
+                                  const std::shared_ptr<SelectionVector> probe_selection) {
+  DCHECK_GT(build_batch.num_rows(), 0);
+  DCHECK_GT(probe_batch.num_rows(), 0);
+
+  auto eval_batch = annotator_.PrepareEvalBatch(probe_batch, build_batch, probe_selection, build_selection);
+  DCHECK_GT(eval_batch->GetNumBuffers(), 0);
+
+  auto& compiled_expr = compiled_exprs_.front();
+  // generate data/offset vectors.
+  auto build_num_rows = build_batch.num_rows();
+  auto probe_num_rows = probe_batch.num_rows();
+
+  int64_t out_num_records;
+  JoinEvalFunc jit_function = compiled_expr->GetJoinJITFunction();
+  jit_function(eval_batch->GetBufferArray(), eval_batch->GetBufferOffsetArray(),
+               eval_batch->GetLocalBitMapArray(),
+               (int64_t)eval_batch->GetExecutionContext(), probe_num_rows, build_num_rows, &out_num_records);
+
+  // check for execution errors
+  ARROW_RETURN_IF(
+      eval_batch->GetExecutionContext()->has_error(),
+      Status::ExecutionError(eval_batch->GetExecutionContext()->get_error()));
+
+  build_selection->SetNumSlots(out_num_records);
+  probe_selection->SetNumSlots(out_num_records);
+  return Status::OK();
+}
+
 llvm::Value* LLVMGenerator::LoadVectorAtIndex(llvm::Value* arg_addrs, int idx,
                                               const std::string& name) {
   llvm::IRBuilder<>* builder = ir_builder();
@@ -168,14 +236,34 @@ llvm::Value* LLVMGenerator::GetDataBufferPtrReference(llvm::Value* arg_addrs, in
 /// Get reference to data array at specified index in the args list.
 llvm::Value* LLVMGenerator::GetDataReference(llvm::Value* arg_addrs, int idx,
                                              FieldPtr field) {
-  const std::string& name = field->name();
+  return GetDataReference(arg_addrs, idx, field->name(), types()->DataVecType(field->type()));
+}
+
+llvm::Value* LLVMGenerator::GetDataReference(llvm::Value* arg_addrs, int idx, SelectionVector::Mode sv_mode) {
+  auto name = "sv_" + std::to_string(idx);
+  llvm::Type* type;
+  switch (sv_mode) {
+    case SelectionVector::MODE_NONE:
+      // panic?
+    case SelectionVector::MODE_UINT16:
+      type = types()->i16_type();
+      break;
+    case SelectionVector::MODE_UINT32:
+      type = types()->i32_type();
+      break;
+    case SelectionVector::MODE_UINT64:
+      type = types()->i64_type();
+  }
+  return GetDataReference(arg_addrs, idx, name, type);
+}
+
+llvm::Value* LLVMGenerator::GetDataReference(llvm::Value* arg_addrs, int idx, const std::string& name, llvm::Type* type) {
   llvm::Value* load = LoadVectorAtIndex(arg_addrs, idx, name);
-  llvm::Type* base_type = types()->DataVecType(field->type());
   llvm::Value* ret;
-  if (base_type->isPointerTy()) {
-    ret = ir_builder()->CreateIntToPtr(load, base_type, name + "_darray");
+  if (type->isPointerTy()) {
+    ret = ir_builder()->CreateIntToPtr(load, type, name + "_darray");
   } else {
-    llvm::Type* pointer_type = types()->ptr_type(base_type);
+    llvm::Type* pointer_type = types()->ptr_type(type);
     ret = ir_builder()->CreateIntToPtr(load, pointer_type, name + "_darray");
   }
   return ret;
@@ -396,6 +484,185 @@ Status LLVMGenerator::CodeGenExprValue(DexPtr value_expr, int buffer_count,
   return Status::OK();
 }
 
+Status LLVMGenerator::NLJECodeGen(DexPtr value_expr, int buffer_count, llvm::Function** fn, int out_idx,
+                                  SelectionVector::Mode left_sv_mode, SelectionVector::Mode right_sv_mode) {
+  llvm::IRBuilder<>* builder = ir_builder();
+  // Create fn prototype :
+  //   int cond_expr (long **addrs, long *offsets, long **bitmaps,
+  //               long *context_ptr, long build_nrec, long probe_nrec)
+  std::vector<llvm::Type*> arguments;
+  arguments.push_back(types()->i64_ptr_type());  // addrs
+  arguments.push_back(types()->i64_ptr_type());  // offsets
+  arguments.push_back(types()->i64_ptr_type());  // bitmaps
+  arguments.push_back(types()->i64_type());  // ctxt_ptr
+  arguments.push_back(types()->i64_type());  // probe_nrec
+  arguments.push_back(types()->i64_type());  // build_nrec
+  arguments.push_back(types()->i64_ptr_type());  // out_nrec_ptr
+  llvm::FunctionType* prototype =
+      llvm::FunctionType::get(types()->i32_type(), arguments, false /*isVarArg*/);
+
+  // Create fn
+  std::string func_name = "boolean_expr";
+  engine_->AddFunctionToCompile(func_name);
+  *fn = llvm::Function::Create(prototype, llvm::GlobalValue::ExternalLinkage, func_name,
+                               module());
+  ARROW_RETURN_IF((*fn == nullptr), Status::CodeGenError("Error creating function."));
+
+  // Name the arguments
+  llvm::Function::arg_iterator args = (*fn)->arg_begin();
+  llvm::Value* arg_addrs = &*args;
+  arg_addrs->setName("args");
+  ++args;
+  llvm::Value* arg_addr_offsets = &*args;
+  arg_addr_offsets->setName("arg_addr_offsets");
+  ++args;
+  llvm::Value* arg_local_bitmaps = &*args;
+  arg_local_bitmaps->setName("local_bitmaps");
+  ++args;
+  llvm::Value* arg_context_ptr = &*args;
+  arg_context_ptr->setName("context_ptr");
+  ++args;
+  llvm::Value* arg_probe_nrecords = &*args;
+  arg_probe_nrecords->setName("probe_nrecords");
+  ++args;
+  llvm::Value* arg_build_nrecords = &*args;
+  arg_build_nrecords->setName("build_nrecords");
+  ++args;
+  llvm::Value* arg_out_nrecords_ptr = &*args;
+  arg_out_nrecords_ptr->setName("out_nrecords_ptr");
+
+  llvm::BasicBlock* entry = llvm::BasicBlock::Create(*context(), "entry", *fn);
+  llvm::BasicBlock* outer_loop = llvm::BasicBlock::Create(*context(), "outer_loop", *fn);
+  llvm::BasicBlock* inner_loop = llvm::BasicBlock::Create(*context(), "inner_loop", *fn);
+  llvm::BasicBlock* matched = llvm::BasicBlock::Create(*context(), "matched", *fn);
+  llvm::BasicBlock* inner_loop_exit = llvm::BasicBlock::Create(*context(), "inner_loop_exit", *fn);
+  llvm::BasicBlock* outer_loop_exit = llvm::BasicBlock::Create(*context(), "outer_loop_exit", *fn);
+  llvm::BasicBlock* exit = llvm::BasicBlock::Create(*context(), "exit", *fn);
+
+  builder->SetInsertPoint(entry);
+  llvm::Value* build_output_ref =
+      GetDataReference(arg_addrs, out_idx + 1, SelectionVector::MODE_UINT32);
+  llvm::Value* probe_output_ref =
+      GetDataReference(arg_addrs, out_idx, SelectionVector::MODE_UINT16);
+
+  std::vector<llvm::Value*> slice_offsets;
+  for (int idx = 0; idx < buffer_count; idx++) {
+    auto offsetAddr = builder->CreateGEP(arg_addr_offsets, types()->i32_constant(idx));
+    auto offset = builder->CreateLoad(offsetAddr);
+    slice_offsets.push_back(offset);
+  }
+
+  builder->SetInsertPoint(outer_loop);
+  llvm::PHINode* probe_index = builder->CreatePHI(types()->i64_type(), 2, "probe_index");
+  llvm::PHINode* out_index_outer = builder->CreatePHI(types()->i64_type(), 2, "out_index_outer");
+  builder->CreateBr(inner_loop);
+
+  builder->SetInsertPoint(inner_loop);
+  llvm::PHINode* build_index = builder->CreatePHI(types()->i64_type(), 2, "build_index");
+  llvm::PHINode* out_index_inner = builder->CreatePHI(types()->i64_type(), 2, "out_index_inner");
+
+  Visitor visitor(this, *fn, entry, arg_addrs, arg_local_bitmaps, slice_offsets,
+                  arg_context_ptr, probe_index, build_index);
+  value_expr->Accept(visitor);
+  llvm::Value* cond_out = visitor.result()->data();
+
+  llvm::BasicBlock* loop_body_tail = builder->GetInsertBlock();
+  builder->SetInsertPoint(entry);
+  builder->CreateBr(outer_loop);
+  builder->SetInsertPoint(loop_body_tail);
+
+  builder->CreateCondBr(cond_out, matched, inner_loop_exit);
+
+  // Matched block
+  builder->SetInsertPoint(matched);
+  
+  // save probe index in SV
+  ADD_TRACE("saving probe index: %T", probe_index);
+  llvm::Type* left_sv_type;
+  switch (left_sv_mode) {
+    case SelectionVector::MODE_NONE: // panic?
+    case SelectionVector::MODE_UINT16:
+      left_sv_type = types()->i16_type();
+      break;
+    case SelectionVector::MODE_UINT32:
+      left_sv_type = types()->i32_type();
+      break;
+    case SelectionVector::MODE_UINT64:
+      left_sv_type = types()->i64_type();
+  }
+  llvm::Value* probe_index_cast = builder->CreateIntCast(probe_index, left_sv_type, true, "probe_index_cast");
+  llvm::Value* probe_slot_offset = builder->CreateGEP(probe_output_ref, out_index_inner);
+  builder->CreateStore(probe_index_cast, probe_slot_offset);
+  
+  // save build index in SV
+  ADD_TRACE("saving build index: %T", build_index);
+  llvm::Type* right_sv_type;
+  switch (right_sv_mode) {
+    case SelectionVector::MODE_NONE: // panic?
+    case SelectionVector::MODE_UINT16:
+      right_sv_type = types()->i16_type();
+      break;
+    case SelectionVector::MODE_UINT32:
+      right_sv_type = types()->i32_type();
+      break;
+    case SelectionVector::MODE_UINT64:
+      right_sv_type = types()->i64_type();
+  }
+  llvm::Value* build_index_cast = builder->CreateIntCast(build_index, right_sv_type, true, "build_index_cast");
+  llvm::Value* build_slot_offset = builder->CreateGEP(build_output_ref, out_index_inner);
+  builder->CreateStore(build_index_cast, build_slot_offset);
+  
+  // increment out_index_inner
+  llvm::Value* out_index_update = builder->CreateAdd(out_index_inner, types()->i64_constant(1), "out_index+1");
+  builder->CreateBr(inner_loop_exit);
+
+  // Inner Loop Exit
+  builder->SetInsertPoint(inner_loop_exit);
+
+  llvm::PHINode* out_index_inner_exit = builder->CreatePHI(types()->i64_type(), 2, "out_index_inner_exit");
+  out_index_inner_exit->addIncoming(out_index_update, matched);
+  out_index_inner_exit->addIncoming(out_index_inner, inner_loop);
+
+  out_index_inner->addIncoming(out_index_inner_exit, inner_loop_exit);
+  out_index_inner->addIncoming(out_index_outer, outer_loop);
+
+  if (visitor.has_arena_allocs()) {
+    // Reset allocations to avoid excessive memory usage. Once the result is copied to
+    // the output vector (store instruction above), any memory allocations in this
+    // iteration of the loop are no longer needed.
+    std::vector<llvm::Value*> reset_args;
+    reset_args.push_back(arg_context_ptr);
+    AddFunctionCall("gdv_fn_context_arena_reset", types()->void_type(), reset_args);
+  }
+
+  build_index->addIncoming(types()->i64_constant(0), outer_loop);
+  llvm::Value* build_index_update = builder->CreateAdd(build_index, types()->i64_constant(1), "build_index+1");
+  build_index->addIncoming(build_index_update, inner_loop_exit);
+
+  llvm::Value* build_index_check =
+      builder->CreateICmpSLT(build_index_update, arg_build_nrecords, "build_index < build_nrec");
+  builder->CreateCondBr(build_index_check, inner_loop, outer_loop_exit);
+
+  // Outer Loop Exit
+  builder->SetInsertPoint(outer_loop_exit);
+  probe_index->addIncoming(types()->i64_constant(0), entry);
+  llvm::Value* probe_index_update = builder->CreateAdd(probe_index, types()->i64_constant(1), "probe_index+1");
+  probe_index->addIncoming(probe_index_update, outer_loop_exit);
+
+  out_index_outer->addIncoming(types()->i64_constant(0), entry);
+  out_index_outer->addIncoming(out_index_inner_exit, outer_loop_exit);
+  
+  llvm::Value* probe_index_check =
+      builder->CreateICmpSLT(probe_index_update, arg_probe_nrecords, "probe_index < probe_nrec");
+  builder->CreateCondBr(probe_index_check, outer_loop, exit);
+  
+  // Loop exit
+  builder->SetInsertPoint(exit);
+  builder->CreateStore(out_index_outer, arg_out_nrecords_ptr);
+  builder->CreateRet(types()->i32_constant(0));
+  return Status::OK();
+}
+
 /// Return value of a bit in bitMap.
 llvm::Value* LLVMGenerator::GetPackedBitValue(llvm::Value* bitmap,
                                               llvm::Value* position) {
@@ -534,14 +801,48 @@ LLVMGenerator::Visitor::Visitor(LLVMGenerator* generator, llvm::Function* functi
       slice_offsets_(slice_offsets),
       arg_context_ptr_(arg_context_ptr),
       loop_var_(loop_var),
+      is_double_batch_(false),
       has_arena_allocs_(false) {
   ADD_VISITOR_TRACE("Iteration %T", loop_var);
 }
 
+LLVMGenerator::Visitor::Visitor(LLVMGenerator* generator, llvm::Function* function,
+                                llvm::BasicBlock* entry_block, llvm::Value* arg_addrs,
+                                llvm::Value* arg_local_bitmaps, std::vector<llvm::Value*> slice_offsets,
+                                llvm::Value* arg_context_ptr, llvm::Value* probe_index,
+                                llvm::Value* build_index)
+    : generator_(generator),
+      function_(function),
+      entry_block_(entry_block),
+      arg_addrs_(arg_addrs),
+      arg_local_bitmaps_(arg_local_bitmaps),
+      slice_offsets_(slice_offsets),
+      arg_context_ptr_(arg_context_ptr),
+      probe_index_(probe_index),
+      build_index_(build_index),
+      is_double_batch_(true),
+      has_arena_allocs_(false) {
+  ADD_VISITOR_TRACE("Iteration: probe index %T", probe_index);
+  ADD_VISITOR_TRACE("Iteration: build index %T", build_index);
+}
+
 void LLVMGenerator::Visitor::Visit(const VectorReadFixedLenValueDex& dex) {
   llvm::IRBuilder<>* builder = ir_builder();
+  // send identifer plus field name
   llvm::Value* slot_ref = GetBufferReference(dex.DataIdx(), kBufferTypeData, dex.Field());
-  llvm::Value* slot_index = builder->CreateAdd(loop_var_, GetSliceOffset(dex.DataIdx()));
+
+  llvm::Value* slot_index;
+  if (is_double_batch_) {
+    if (dex.Ordinal() == 0) {
+      slot_index =
+        builder->CreateAdd(probe_index_, GetSliceOffset(dex.DataIdx()));
+    } else {
+      slot_index =
+        builder->CreateAdd(build_index_, GetSliceOffset(dex.DataIdx()));
+    }
+  } else {
+    slot_index = builder->CreateAdd(loop_var_, GetSliceOffset(dex.DataIdx()));
+  }
   llvm::Value* slot_value;
   std::shared_ptr<LValue> lvalue;
 
@@ -577,8 +878,20 @@ void LLVMGenerator::Visitor::Visit(const VectorReadVarLenValueDex& dex) {
   // compute len from the offsets array.
   llvm::Value* offsets_slot_ref =
       GetBufferReference(dex.OffsetsIdx(), kBufferTypeOffsets, dex.Field());
-  llvm::Value* offsets_slot_index =
+  llvm::Value* offsets_slot_index;
+  if (is_double_batch_) {
+    if (dex.Ordinal() == 0) {
+      offsets_slot_index =
+        builder->CreateAdd(probe_index_, GetSliceOffset(dex.OffsetsIdx()));
+    } else {
+      // assert isBuildBatch() is True 
+      offsets_slot_index =
+        builder->CreateAdd(build_index_, GetSliceOffset(dex.OffsetsIdx()));
+    }
+  } else {
+    offsets_slot_index =
       builder->CreateAdd(loop_var_, GetSliceOffset(dex.OffsetsIdx()));
+  }
 
   // => offset_start = offsets[loop_var]
   slot = builder->CreateGEP(offsets_slot_ref, offsets_slot_index);
@@ -607,8 +920,21 @@ void LLVMGenerator::Visitor::Visit(const VectorReadValidityDex& dex) {
   llvm::IRBuilder<>* builder = ir_builder();
   llvm::Value* slot_ref =
       GetBufferReference(dex.ValidityIdx(), kBufferTypeValidity, dex.Field());
-  llvm::Value* slot_index =
+  llvm::Value* slot_index;
+  if (is_double_batch_) {
+    if (dex.Ordinal() == 0) {
+      slot_index =
+        builder->CreateAdd(probe_index_, GetSliceOffset(dex.ValidityIdx()));
+    } else {
+      // assert isBuildBatch() is True 
+      slot_index =
+        builder->CreateAdd(build_index_, GetSliceOffset(dex.ValidityIdx()));
+    }
+  } else {
+    slot_index =
       builder->CreateAdd(loop_var_, GetSliceOffset(dex.ValidityIdx()));
+  }
+
   llvm::Value* validity = generator_->GetPackedValidityBitValue(slot_ref, slot_index);
 
   ADD_VISITOR_TRACE("visit validity vector " + dex.FieldName() + " value %T", validity);

@@ -35,7 +35,7 @@ namespace gandiva {
 
 // Decompose a field node - simply seperate out validity & value arrays.
 Status ExprDecomposer::Visit(const FieldNode& node) {
-  auto desc = annotator_.CheckAndAddInputFieldDescriptor(node.field());
+  auto desc = annotator_.CheckAndAddInputFieldDescriptor(node.field(), node.ordinal());
 
   DexPtr validity_dex = std::make_shared<VectorReadValidityDex>(desc);
   DexPtr value_dex;

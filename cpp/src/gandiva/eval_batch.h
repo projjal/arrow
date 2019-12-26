@@ -43,7 +43,16 @@ class EvalBatch {
     execution_context_.reset(new ExecutionContext());
   }
 
+  EvalBatch(int64_t left_nrecords, int64_t right_nrecords, int64_t out_nrecords,
+                 int num_buffers, int num_local_bitmaps)
+      : left_nrecords_(left_nrecords), right_nrecords_(right_nrecords),
+        out_nrecords_(out_nrecords), num_buffers_(num_buffers){}
+
   int64_t num_records() const { return num_records_; }
+
+  int64_t left_nrecords() const { return left_nrecords_; }
+  int64_t right_nrecords() const { return right_nrecords_; }
+  int64_t out_nrecords() const { return out_nrecords_; }
 
   uint8_t** GetBufferArray() const { return buffers_array_.get(); }
 
@@ -87,6 +96,10 @@ class EvalBatch {
  private:
   /// number of records in the current batch.
   int64_t num_records_;
+
+  int64_t left_nrecords_;
+  int64_t right_nrecords_;
+  int64_t out_nrecords_;
 
   // number of buffers.
   int num_buffers_;

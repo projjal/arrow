@@ -47,15 +47,28 @@ Status ExprValidator::Visit(const FieldNode& node) {
                   Status::ExpressionValidationError("Field ", node.field()->name(),
                                                     " has unsupported data type ",
                                                     node.return_type()->name()));
+  auto ordinal = node.ordinal();
+  ARROW_RETURN_IF(node.ordinal() > 1 || node.ordinal() < -1,
+                  Status::ExpressionValidationError("Invalid field node ordinal %d",
+                  ordinal));
 
   // Ensure that field is found in schema
-  auto field_in_schema_entry = field_map_.find(node.field()->name());
-  ARROW_RETURN_IF(field_in_schema_entry == field_map_.end(),
-                  Status::ExpressionValidationError("Field ", node.field()->name(),
-                                                    " not in schema."));
+  FieldPtr field_in_schema;
+  if (ordinal == -1) {
+    auto field_in_schema_entry = field_map_.find(node.field()->name());
+    ARROW_RETURN_IF(field_in_schema_entry == field_map_.end(),
+                    Status::ExpressionValidationError("Field ", node.field()->name(),
+                                                      " not in schema."));
+    field_in_schema = field_in_schema_entry->second;
+  } else {
+    auto field_in_schema_entry = multi_field_map_.find(std::make_pair(node.field()->name(), ordinal));
+    ARROW_RETURN_IF(field_in_schema_entry == multi_field_map_.end(),
+                    Status::ExpressionValidationError("Field ", node.field()->name(),
+                                                      " not in left or right schema."));
+    field_in_schema = field_in_schema_entry->second;
+  }
 
   // Ensure that that the found field match.
-  FieldPtr field_in_schema = field_in_schema_entry->second;
   ARROW_RETURN_IF(!field_in_schema->Equals(node.field()),
                   Status::ExpressionValidationError(
                       "Field definition in schema ", field_in_schema->ToString(),

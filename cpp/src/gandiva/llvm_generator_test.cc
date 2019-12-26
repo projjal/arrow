@@ -26,6 +26,7 @@
 #include "gandiva/expression.h"
 #include "gandiva/func_descriptor.h"
 #include "gandiva/function_registry.h"
+#include "gandiva/selection_vector.h"
 #include "gandiva/tests/test_util.h"
 
 namespace gandiva {
@@ -118,6 +119,85 @@ TEST_F(TestLLVMGenerator, TestAdd) {
   uint32_t expected[] = {6, 8, 10, 12};
   for (int i = 0; i < num_records; i++) {
     EXPECT_EQ(expected[i], out[i]);
+  }
+}
+
+TEST_F(TestLLVMGenerator, TestJoin) {
+  // Setup LLVM generator to do an arithmetic add of two vectors
+  std::unique_ptr<LLVMGenerator> generator;
+  auto status = LLVMGenerator::Make(TestConfiguration(), &generator);
+  EXPECT_TRUE(status.ok());
+  Annotator annotator;
+
+  // probe
+  auto field0 = std::make_shared<arrow::Field>("f0", arrow::int32());
+  auto desc0 = annotator.CheckAndAddInputFieldDescriptor(field0, 0);
+  auto validity_dex0 = std::make_shared<VectorReadValidityDex>(desc0);
+  auto value_dex0 = std::make_shared<VectorReadFixedLenValueDex>(desc0);
+  auto pair0 = std::make_shared<ValueValidityPair>(validity_dex0, value_dex0);
+
+  // build
+  auto field1 = std::make_shared<arrow::Field>("f1", arrow::int32());
+  auto desc1 = annotator.CheckAndAddInputFieldDescriptor(field1, 1);
+  auto validity_dex1 = std::make_shared<VectorReadValidityDex>(desc1);
+  auto value_dex1 = std::make_shared<VectorReadFixedLenValueDex>(desc1);
+  auto pair1 = std::make_shared<ValueValidityPair>(validity_dex1, value_dex1);
+
+  DataTypeVector params{arrow::int32(), arrow::int32()};
+  auto func_desc = std::make_shared<FuncDescriptor>("less_than", params, arrow::boolean());
+  FunctionSignature signature(func_desc->name(), func_desc->params(),
+                              func_desc->return_type());
+  const NativeFunction* native_func =
+      generator->function_registry_.LookupSignature(signature);
+
+  std::vector<ValueValidityPairPtr> pairs{pair0, pair1};
+  auto func_dex = std::make_shared<NonNullableFuncDex>(func_desc, native_func,
+                                                       FunctionHolderPtr(nullptr), pairs);
+
+  auto out_idx = annotator.AddJoinOutput();
+
+
+
+  llvm::Function* ir_func = nullptr;
+
+  status = generator->NLJECodeGen(func_dex, 4, &ir_func, out_idx, SelectionVector::Mode::MODE_UINT16, SelectionVector::Mode::MODE_UINT32);
+  EXPECT_TRUE(status.ok()) << status.message();
+
+  status = generator->engine_->FinalizeModule(true, false);
+  EXPECT_TRUE(status.ok()) << status.message();
+
+  JoinEvalFunc eval_func = (JoinEvalFunc)generator->engine_->CompiledFunction(ir_func);
+
+  int num_records = 4;
+  uint32_t a0[] = {1, 2, 3, 4}; //probe
+  uint32_t a1[] = {1, 2, 3, 4}; //build
+  uint64_t in_bitmap = 0xffffffffffffffffull;
+
+  uint32_t build_sv[] = {0, 0, 0, 0,
+                          0, 0, 0, 0,
+                          0, 0, 0, 0,
+                          0, 0, 0, 0};
+  uint16_t probe_sv[] = {0, 0, 0, 0,
+                          0, 0, 0, 0,
+                          0, 0, 0, 0,
+                          0, 0, 0, 0};
+
+  uint8_t* addrs[] = {
+      reinterpret_cast<uint8_t*>(a0),  reinterpret_cast<uint8_t*>(&in_bitmap),
+      reinterpret_cast<uint8_t*>(a1),  reinterpret_cast<uint8_t*>(&in_bitmap),
+      reinterpret_cast<uint8_t*>(probe_sv),
+      reinterpret_cast<uint8_t*>(build_sv),
+  };
+  int64_t addr_offsets[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  int64_t out_nrecords;
+  eval_func(addrs, addr_offsets, nullptr, 0 /* dummy context ptr */,
+            num_records, num_records, &out_nrecords);
+
+  int32_t expected_build[] = {1, 2, 3, 2, 3, 3};
+  int16_t expected_probe[] = {0, 0, 0, 1, 1, 2};
+  for (int i = 0; i < out_nrecords; i++) {
+    EXPECT_EQ(expected_build[i], build_sv[i]);
+    EXPECT_EQ(expected_probe[i], probe_sv[i]);
   }
 }
 

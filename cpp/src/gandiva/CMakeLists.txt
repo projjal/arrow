@@ -70,6 +70,7 @@ set(SRC_FILES
     llvm_types.cc
     like_holder.cc
     literal_holder.cc
+    nested_loop_join.cc
     projector.cc
     regex_util.cc
     selection_vector.cc

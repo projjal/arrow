@@ -31,12 +31,14 @@ class FieldDescriptor {
   static const int kInvalidIdx = -1;
 
   FieldDescriptor(FieldPtr field, int data_idx, int validity_idx = kInvalidIdx,
-                  int offsets_idx = kInvalidIdx, int data_buffer_ptr_idx = kInvalidIdx)
+                  int offsets_idx = kInvalidIdx, int data_buffer_ptr_idx = kInvalidIdx,
+                  int ordinal = kInvalidIdx)
       : field_(field),
         data_idx_(data_idx),
         validity_idx_(validity_idx),
         offsets_idx_(offsets_idx),
-        data_buffer_ptr_idx_(data_buffer_ptr_idx) {}
+        data_buffer_ptr_idx_(data_buffer_ptr_idx),
+        ordinal_(ordinal) {}
 
   /// Index of validity array in the array-of-buffers
   int validity_idx() const { return validity_idx_; }
@@ -52,6 +54,8 @@ class FieldDescriptor {
 
   FieldPtr field() const { return field_; }
 
+  int oridinal() const { return ordinal_; }
+
   const std::string& Name() const { return field_->name(); }
   DataTypePtr Type() const { return field_->type(); }
 
@@ -59,12 +63,15 @@ class FieldDescriptor {
 
   bool HasDataBufferPtrIdx() const { return data_buffer_ptr_idx_ != kInvalidIdx; }
 
+  bool HasOrdinal() const { return ordinal_ != kInvalidIdx; }
+
  private:
   FieldPtr field_;
   int data_idx_;
   int validity_idx_;
   int offsets_idx_;
   int data_buffer_ptr_idx_;
+  int ordinal_;
 };
 
 }  // namespace gandiva
