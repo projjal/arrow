@@ -766,4 +766,33 @@ TEST_F(TestProjector, TestOffset) {
   EXPECT_ARROW_ARRAY_EQUALS(exp_sum, outputs.at(0));
 }
 
+TEST_F(TestProjector, TestProjectCastVarcharFromInt) {
+  auto field0 = field("f0", int32());
+  auto field1 = field("f1", arrow::int64());
+  auto schema = arrow::schema({field0, field1});
+
+  auto field_out = field("out", arrow::utf8());
+
+  auto expr = TreeExprBuilder::MakeExpression("castVARCHAR", {field0, field1}, field_out);
+
+  std::shared_ptr<Projector> projector;
+  auto status = Projector::Make(schema, {expr}, TestConfiguration(), &projector);
+  EXPECT_TRUE(status.ok()) << status.message();
+
+  int num_records = 4;
+  auto array0 = MakeArrowArrayInt32({12, 23, 345, 400}, {true, true, true, true});
+  auto array1 = MakeArrowArrayInt64({5, 5, 5, 5}, {true, true, true, true});
+
+  auto expected = MakeArrowArrayUtf8({"12", "23", "345", "400"}, {true, true, true, true});
+
+  auto in_batch = arrow::RecordBatch::Make(schema, num_records, {array0, array1});
+
+  // Evaluate expression
+  arrow::ArrayVector outputs;
+  status = projector->Evaluate(*in_batch, pool_, &outputs);
+  EXPECT_TRUE(status.ok()) << status.message();
+
+  EXPECT_ARROW_ARRAY_EQUALS(expected, outputs.at(0));
+}
+
 }  // namespace gandiva
