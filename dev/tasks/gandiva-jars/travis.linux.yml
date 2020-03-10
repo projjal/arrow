@@ -21,6 +21,11 @@ language: cpp
 compiler: gcc
 services:
   - docker
+addons:
+  apt:
+    packages:
+      - "python3"
+      - "python3-pip"
 
 # don't build twice
 if: tag IS blank
@@ -53,15 +58,15 @@ script:
   # please refer to README for steps to update this image
   - docker run -v $PWD:/io -v $PWD:/arrow quay.io/praveenbingo/arrow:buildGandivaDocker /io/dev/tasks/gandiva-jars/build-cpp-linux.sh || travis_terminate 1
   - dev/tasks/gandiva-jars/build-java.sh || travis_terminate 1
-
-deploy:
-  provider: releases
-  api_key: $CROSSBOW_GITHUB_TOKEN
-  file_glob: true
-  file: dist/*.jar
-  skip_cleanup: true
-  on:
-    tags: true
+  - pip3 install click github3.py jinja2 jira pygit2 ruamel.yaml setuptools_scm toolz
+  - >
+    python3 dev/tasks/crossbow.py
+    --queue-path $TRAVIS_BUILD_DIR
+    --queue-remote {{ queue.remote_url }}
+    upload-artifacts
+    --sha {{ task.branch }}
+    --tag {{ task.tag }}
+    --pattern "dist/*.jar"
 
 notifications:
   email:
