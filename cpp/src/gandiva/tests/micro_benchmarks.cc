@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <random>
 #include <stdlib.h>
 #include "arrow/memory_pool.h"
 #include "arrow/status.h"
@@ -100,6 +101,53 @@ static void TimedTestBigNested(benchmark::State& state) {
 
   BoundedInt32DataGenerator data_generator(250);
   ProjectEvaluator evaluator(projector);
+
+  Status status = TimedEvaluate<arrow::Int32Type, int32_t>(
+      schema, evaluator, data_generator, pool_, 1 * MILLION, 16 * THOUSAND, state);
+  ASSERT_TRUE(status.ok());
+}
+
+static void TimedTestBigAndOr(benchmark::State& state) {
+  Random random;
+  // schema for input fields
+  auto fielda = field("a", int32());
+  auto schema = arrow::schema({fielda});
+  auto pool_ = arrow::default_memory_pool();
+
+  // output fields
+  auto field_result = field("res", boolean());
+
+  auto node_a = TreeExprBuilder::MakeField(fielda);
+
+  auto literal = TreeExprBuilder::MakeLiteral(random.next());
+  auto fn =
+      TreeExprBuilder::MakeFunction("equal", {node_a, literal}, boolean());
+  auto last = fn;
+
+  int i = 2000;
+  while(i-- > 0) {
+    literal = TreeExprBuilder::MakeLiteral(random.next());
+    fn =
+        TreeExprBuilder::MakeFunction("equal", {node_a, literal}, boolean());
+    
+    NodePtr res;
+    // if (random.next() % 2 == 0) {
+    if (false) {
+      res = TreeExprBuilder::MakeAnd({fn, last});
+    } else {
+      res = TreeExprBuilder::MakeOr({fn, last});
+    }
+    last = res;
+  }
+
+  auto condition = TreeExprBuilder::MakeCondition(last);
+
+  std::shared_ptr<Filter> filter;
+  
+  ASSERT_OK(Filter::Make(schema, condition, TestConfiguration(), &filter));
+
+  Int32DataGenerator data_generator;
+  FilterEvaluator evaluator(filter);
 
   Status status = TimedEvaluate<arrow::Int32Type, int32_t>(
       schema, evaluator, data_generator, pool_, 1 * MILLION, 16 * THOUSAND, state);
@@ -434,23 +482,25 @@ static void DecimalAdd3Large(benchmark::State& state) {
   DoDecimalAdd3(state, DecimalTypeUtil::kMaxPrecision, 18, true);
 }
 
-BENCHMARK(TimedTestAdd3)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestBigNested)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestExtractYear)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestFilterAdd2)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestFilterLike)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestCastFloatFromString)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestCastIntFromString)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestAllocs)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestMultiOr)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(TimedTestInExpr)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd2Fast)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd2LeadingZeroes)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd2LeadingZeroesWithDiv)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd2Large)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd3Fast)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd3LeadingZeroes)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd3LeadingZeroesWithDiv)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
-BENCHMARK(DecimalAdd3Large)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestAdd3)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestBigNested)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+BENCHMARK(TimedTestBigAndOr)->MinTime(1.0)->Unit(benchmark::kMillisecond);
+// BENCHMARK(TimedTestExtractYear)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestFilterAdd2)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestFilterLike)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestCastFloatFromString)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestCastIntFromString)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestAllocs)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestMultiOr)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(TimedTestInExpr)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd2Fast)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd2LeadingZeroes)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd2LeadingZeroesWithDiv)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd2Large)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd3Fast)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd3LeadingZeroes)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd3LeadingZeroesWithDiv)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+// BENCHMARK(DecimalAdd3Large)->MinTime(1.0)->Unit(benchmark::kMicrosecond);
+
 
 }  // namespace gandiva
