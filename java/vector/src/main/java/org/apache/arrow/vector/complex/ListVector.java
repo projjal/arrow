@@ -224,7 +224,6 @@ public class ListVector extends BaseRepeatedValueVector implements PromotableVec
   @Override
   public List<ArrowBuf> getFieldBuffers() {
     List<ArrowBuf> result = new ArrayList<>(2);
-    setReaderAndWriterIndex();
     result.add(validityBuffer);
     result.add(offsetBuffer);
 
@@ -664,8 +663,8 @@ public class ListVector extends BaseRepeatedValueVector implements PromotableVec
       buffers = new ArrowBuf[0];
     } else {
       List<ArrowBuf> list = new ArrayList<>();
-      list.add(offsetBuffer);
       list.add(validityBuffer);
+      list.add(offsetBuffer);
       list.addAll(Arrays.asList(vector.getBuffers(false)));
       buffers = list.toArray(new ArrowBuf[list.size()]);
     }

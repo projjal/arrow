@@ -172,7 +172,6 @@ public class FixedSizeListVector extends BaseValueVector implements BaseListVect
   @Override
   public List<ArrowBuf> getFieldBuffers() {
     List<ArrowBuf> result = new ArrayList<>(1);
-    setReaderAndWriterIndex();
     result.add(validityBuffer);
 
     return result;

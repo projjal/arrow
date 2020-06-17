@@ -159,7 +159,6 @@ public class UnionVector implements FieldVector {
   @Override
   public List<ArrowBuf> getFieldBuffers() {
     List<ArrowBuf> result = new ArrayList<>(1);
-    setReaderAndWriterIndex();
     result.add(typeBuffer);
 
     return result;

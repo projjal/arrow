@@ -117,7 +117,6 @@ public class StructVector extends NonNullableStructVector implements FieldVector
   @Override
   public List<ArrowBuf> getFieldBuffers() {
     List<ArrowBuf> result = new ArrayList<>(1);
-    setReaderAndWriterIndex();
     result.add(validityBuffer);
 
     return result;

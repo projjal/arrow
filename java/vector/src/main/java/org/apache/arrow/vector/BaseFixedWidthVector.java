@@ -503,7 +503,6 @@ public abstract class BaseFixedWidthVector extends BaseValueVector
    */
   public List<ArrowBuf> getFieldBuffers() {
     List<ArrowBuf> result = new ArrayList<>(2);
-    setReaderAndWriterIndex();
     result.add(validityBuffer);
     result.add(valueBuffer);
 
