@@ -677,7 +677,9 @@ void LLVMGenerator::Visitor::Visit(const LiteralDex& dex) {
     case arrow::Type::BINARY: {
       const std::string& str = arrow::util::get<std::string>(dex.holder());
 
-      llvm::Constant* str_int_cast = types->i64_constant((int64_t)str.c_str());
+      char * str_data = (char *)malloc(str.length());
+      memcpy(str_data, str.data(), str.length());
+      llvm::Constant* str_int_cast = types->i64_constant((int64_t)str_data);
       value = llvm::ConstantExpr::getIntToPtr(str_int_cast, types->i8_ptr_type());
       len = types->i32_constant(static_cast<int32_t>(str.length()));
       break;
