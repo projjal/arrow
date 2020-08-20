@@ -17,6 +17,8 @@
 
 // String functions
 #include "arrow/util/value_parsing.h"
+#include <iostream>
+#include <string>
 
 extern "C" {
 
@@ -839,6 +841,9 @@ const char* replace_utf8_utf8_utf8(gdv_int64 context, const char* text,
   FORCE_INLINE                                                                          \
   gdv_##OUT_TYPE cast##TYPE_NAME##_utf8(int64_t context, const char* data,              \
                                         int32_t len) {                                  \
+    std::cout << "##########################################" << std::endl; \
+    std::cout << std::string(data, len) << std::endl;\
+    std::cout << "##########################################" << std::endl; \
     gdv_##OUT_TYPE val = 0;                                                             \
     int32_t trimmed_len;                                                                \
     data = btrim_utf8(context, data, len, &trimmed_len);                                \

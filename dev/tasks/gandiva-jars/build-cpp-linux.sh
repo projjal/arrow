@@ -38,7 +38,7 @@ cmake -DCMAKE_BUILD_TYPE=Release \
     -DZLIB_ROOT=/usr/local \
     -DCMAKE_INSTALL_PREFIX=/arrow-dist \
     -DCMAKE_INSTALL_LIBDIR=lib \
-    -DARROW_BUILD_TESTS=ON \
+    -DARROW_BUILD_TESTS=OFF \
     -DARROW_BUILD_SHARED=ON \
     -DARROW_BOOST_USE_SHARED=OFF \
     -DARROW_PROTOBUF_USE_SHARED=OFF \
@@ -63,7 +63,6 @@ cmake -DCMAKE_BUILD_TYPE=Release \
     -DBOOST_ROOT=/arrow_boost_dist \
     -GNinja /arrow/cpp
 ninja install
-ninja test
 popd
 
 
