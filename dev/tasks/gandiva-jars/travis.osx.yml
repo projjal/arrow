@@ -34,38 +34,6 @@ env:
 
 before_script:
   - pwd
-  - git clone --no-checkout {{ arrow.remote }} arrow
-  - git -C arrow fetch -t {{ arrow.remote }} {{ arrow.branch }}
-  - if [ $CROSSBOW_USE_COMMIT_ID = true ]; then git -C arrow checkout {{ arrow.head }}; else git -C arrow checkout FETCH_HEAD; fi
-  - export TRAVIS_BUILD_DIR=$TRAVIS_BUILD_DIR/arrow
-  - git -C arrow submodule update --init --recursive
-  - brew update
-  - brew install bison flex llvm
-  - brew tap adoptopenjdk/openjdk
-  - brew cask install adoptopenjdk8
-  - export JAVA_HOME=/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home
-  - export PATH="$JAVA_HOME/bin:$PATH"
-  - export ARROW_TEST_DATA=$TRAVIS_BUILD_DIR/testing/data
-  - echo $JAVA_HOME
-  - which java
 
 script:
   - cd arrow
-  - mkdir -p dist
-  - dev/tasks/gandiva-jars/build-cpp-osx.sh || travis_terminate 1
-  - dev/tasks/gandiva-jars/build-java.sh || travis_terminate 1
-  # deploy using crossbow
-  # pip install pygit2 fails if MACOS_DEPLOYMENT_TARGET is set to an earlier version. Since the
-  # gandiva libraries are already built we can reset MACOS_DEPLOYMENT_TARGET to current osx version
-  - if [[ $MACOSX_DEPLOYMENT_TARGET ]] ; then export MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d '.' -f 1,2) ; fi
-  - brew install libgit2
-  - pip3 install pygit2
-  - pip3 install click github3.py jinja2 jira ruamel.yaml setuptools_scm toolz
-  - >
-    python3 dev/tasks/crossbow.py
-    --queue-path $TRAVIS_BUILD_DIR
-    --queue-remote {{ queue_remote_url }}
-    upload-artifacts
-    --sha {{ task.branch }}
-    --tag {{ task.tag }}
-    --pattern "dist/*.jar"
