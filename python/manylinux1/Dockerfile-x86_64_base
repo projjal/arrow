@@ -51,6 +51,10 @@ RUN /build_grpc.sh
 ADD scripts/build_boost.sh /
 RUN /build_boost.sh
 
+ADD scripts/build_gtest.sh /
+RUN /build_gtest.sh
+ENV GTEST_HOME /usr/local
+
 ADD scripts/build_bison.sh /
 RUN /build_bison.sh
 
@@ -90,6 +94,11 @@ ENV GLOG_HOME /usr/local
 
 WORKDIR /
 RUN git clone https://github.com/matthew-brett/multibuild.git && cd multibuild && git checkout 8882150df6529658700b66bec124dfb77eefca26
+
+ENV llvm=8
+ADD scripts/build_llvm.sh /
+RUN /build_llvm.sh ${llvm}
+
 # Remove unneeded Python versions
 RUN rm -rf /opt/_internal/cpython-2.7.*
 
