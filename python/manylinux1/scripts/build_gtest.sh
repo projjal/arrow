@@ -16,7 +16,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-GTEST_VERSION=1.8.1
+GTEST_VERSION=1.10.0
 
 curl -sL https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz -o googletest-release-${GTEST_VERSION}.tar.gz
 tar xf googletest-release-${GTEST_VERSION}.tar.gz
