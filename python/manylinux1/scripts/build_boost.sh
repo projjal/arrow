@@ -38,7 +38,7 @@ popd
 pushd /arrow_boost
 ls -l
 ./bootstrap.sh
-./b2 -j${NCORES} dll-path="'\$ORIGIN/'" cxxflags='-std=c++11 -fPIC' cflags=-fPIC linkflags="-std=c++11" variant=release link=shared --prefix=/arrow_boost_dist --with-filesystem --with-date_time --with-system --with-regex install
+./b2 -j${NCORES} dll-path="'\$ORIGIN/'" cxxflags='-std=c++11 -fPIC' cflags=-fPIC linkflags="-std=c++11" variant=release link=static --prefix=/arrow_boost_dist --with-filesystem --with-date_time --with-system --with-regex install
 popd
 
 rm -rf ${ARCHIVE_NAME} ${BASE_NAME} arrow_boost
