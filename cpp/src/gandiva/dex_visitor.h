@@ -18,6 +18,7 @@
 #pragma once
 
 #include <string>
+#include <cmath>
 
 #include "arrow/util/logging.h"
 #include "gandiva/visibility.h"
@@ -60,6 +61,8 @@ class GANDIVA_EXPORT DexVisitor {
   virtual void Visit(const BooleanOrDex& dex) = 0;
   virtual void Visit(const InExprDexBase<int32_t>& dex) = 0;
   virtual void Visit(const InExprDexBase<int64_t>& dex) = 0;
+  virtual void Visit(const InExprDexBase<float_t>& dex) = 0;
+  virtual void Visit(const InExprDexBase<double_t>& dex) = 0;
   virtual void Visit(const InExprDexBase<std::string>& dex) = 0;
 };
 
@@ -83,6 +86,8 @@ class GANDIVA_EXPORT DexDefaultVisitor : public DexVisitor {
   VISIT_DCHECK(BooleanOrDex)
   VISIT_DCHECK(InExprDexBase<int32_t>)
   VISIT_DCHECK(InExprDexBase<int64_t>)
+  VISIT_DCHECK(InExprDexBase<float_t>)
+  VISIT_DCHECK(InExprDexBase<double_t>)
   VISIT_DCHECK(InExprDexBase<std::string>)
 };
 
