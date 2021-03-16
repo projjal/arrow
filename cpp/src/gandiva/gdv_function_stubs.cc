@@ -88,21 +88,19 @@ bool gdv_fn_in_expr_lookup_int64(int64_t ptr, int64_t value, bool in_validity) {
 }
 
 bool gdv_fn_in_expr_lookup_float(int64_t ptr, float_t value, bool in_validity){
-//  if (!in_validity) {
-//    return false;
-//  }
-//  gandiva::InHolder<float>* holder = reinterpret_cast<gandiva::InHolder<float>*>(ptr);
-//  return holder->HasValue(value);
-  return false;
+  if (!in_validity) {
+    return false;
+  }
+  gandiva::InHolder<float>* holder = reinterpret_cast<gandiva::InHolder<float>*>(ptr);
+  return holder->HasValue(value);
 }
 
 bool gdv_fn_in_expr_lookup_double(int64_t ptr, double_t value, bool in_validity){
-//  if (!in_validity) {
-//    return false;
-//  }
-//  gandiva::InHolder<double>* holder = reinterpret_cast<gandiva::InHolder<double>*>(ptr);
-//  return holder->HasValue(value);
-  return false;
+  if (!in_validity) {
+    return false;
+  }
+  gandiva::InHolder<double>* holder = reinterpret_cast<gandiva::InHolder<double>*>(ptr);
+  return holder->HasValue(value);
 }
 
 bool gdv_fn_in_expr_lookup_utf8(int64_t ptr, const char* data, int data_len,
@@ -314,14 +312,14 @@ void ExportedStubFunctions::AddMappings(Engine* engine) const {
   engine->AddGlobalMappingForFunc("gdv_fn_in_expr_lookup_float",
                                   types->i1_type() /*return_type*/, args,
                                   reinterpret_cast<void*>(gdv_fn_in_expr_lookup_float));
-//  // gdv_fn_in_expr_lookup_double
-//  args = {types->i64_type(),  // int64_t in holder ptr
-//          types->double_type(),  // double value
-//          types->i1_type()};  // bool in_validity
-//
-//  engine->AddGlobalMappingForFunc("gdv_fn_in_expr_lookup_double",
-//                                  types->i1_type() /*return_type*/, args,
-//                                  reinterpret_cast<void*>(gdv_fn_in_expr_lookup_double));
+  // gdv_fn_in_expr_lookup_double
+  args = {types->i64_type(),  // int64_t in holder ptr
+          types->double_type(),  // double value
+          types->i1_type()};  // bool in_validity
+
+  engine->AddGlobalMappingForFunc("gdv_fn_in_expr_lookup_double",
+                                  types->i1_type() /*return_type*/, args,
+                                  reinterpret_cast<void*>(gdv_fn_in_expr_lookup_double));
   // gdv_fn_populate_varlen_vector
   args = {types->i64_type(),      // int64_t execution_context
           types->i8_ptr_type(),   // int8_t* data ptr
