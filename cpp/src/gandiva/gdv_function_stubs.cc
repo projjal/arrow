@@ -87,7 +87,7 @@ bool gdv_fn_in_expr_lookup_int64(int64_t ptr, int64_t value, bool in_validity) {
   return holder->HasValue(value);
 }
 
-bool gdv_fn_in_expr_lookup_float(int64_t ptr, float_t value, bool in_validity){
+bool gdv_fn_in_expr_lookup_float(int64_t ptr, float_t value, bool in_validity) {
   if (!in_validity) {
     return false;
   }
@@ -95,7 +95,7 @@ bool gdv_fn_in_expr_lookup_float(int64_t ptr, float_t value, bool in_validity){
   return holder->HasValue(value);
 }
 
-bool gdv_fn_in_expr_lookup_double(int64_t ptr, double_t value, bool in_validity){
+bool gdv_fn_in_expr_lookup_double(int64_t ptr, double_t value, bool in_validity) {
   if (!in_validity) {
     return false;
   }
