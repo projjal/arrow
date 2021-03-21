@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -102,6 +103,14 @@ class GANDIVA_EXPORT TreeExprBuilder {
 
   static NodePtr MakeInExpressionBinary(NodePtr node,
                                         const std::unordered_set<std::string>& constants);
+
+  /// \brief creates an in expression for float
+  static NodePtr MakeInExpressionFloat(NodePtr node,
+                                       const std::unordered_set<float_t>& constants);
+
+  /// \brief creates an in expression for double
+  static NodePtr MakeInExpressionDouble(NodePtr node,
+                                        const std::unordered_set<double_t>& constants);
 
   /// \brief Date as s/millis since epoch.
   static NodePtr MakeInExpressionDate32(NodePtr node,
