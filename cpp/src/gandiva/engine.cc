@@ -254,6 +254,10 @@ Status Engine::RemoveUnusedFunctions() {
 Status Engine::FinalizeModule() {
   ARROW_RETURN_NOT_OK(RemoveUnusedFunctions());
 
+  std::cout << "============================================================\n";
+  std::cout << DumpIR() << std::endl;
+  std::cout << "============================================================\n";
+
   if (optimize_) {
     // misc passes to allow for inlining, vectorization, ..
     std::unique_ptr<llvm::legacy::PassManager> pass_manager(
@@ -285,6 +289,10 @@ Status Engine::FinalizeModule() {
   // do the compilation
   execution_engine_->finalizeObject();
   module_finalized_ = true;
+
+  std::cout << "============================================================\n";
+  std::cout << DumpIR() << std::endl;
+  std::cout << "============================================================\n";
 
   return Status::OK();
 }
