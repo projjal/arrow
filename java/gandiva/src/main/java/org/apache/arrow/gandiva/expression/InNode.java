@@ -33,33 +33,45 @@ public class InNode implements TreeNode {
 
   private final Set<Integer> intValues;
   private final Set<Long> longValues;
+  private final Set<Float> floatValues;
+  private final Set<Double> doubleValues;
   private final Set<String> stringValues;
   private final Set<byte[]> binaryValues;
   private final TreeNode input;
 
   private InNode(Set<Integer> values, Set<Long> longValues, Set<String> stringValues, Set<byte[]>
-          binaryValues, TreeNode node) {
+          binaryValues, Set<Float> floatValues, Set<Double> doubleValues, TreeNode node) {
     this.intValues = values;
     this.longValues = longValues;
     this.stringValues = stringValues;
     this.binaryValues = binaryValues;
+    this.floatValues = floatValues;
+    this.doubleValues = doubleValues;
     this.input = node;
   }
 
   public static InNode makeIntInExpr(TreeNode node, Set<Integer> intValues) {
-    return new InNode(intValues, null, null, null, node);
+    return new InNode(intValues, null, null, null, null, null, node);
   }
 
   public static InNode makeLongInExpr(TreeNode node, Set<Long> longValues) {
-    return new InNode(null, longValues, null, null, node);
+    return new InNode(null, longValues, null, null, null, null, node);
+  }
+
+  public static InNode makeFloatInExpr(TreeNode node, Set<Float> floatValues) {
+    return new InNode(null, null, null, null, floatValues, null, node);
+  }
+
+  public static InNode makeDoubleInExpr(TreeNode node, Set<Double> doubleValues) {
+    return new InNode(null, null, null, null, null, doubleValues, node);
   }
 
   public static InNode makeStringInExpr(TreeNode node, Set<String> stringValues) {
-    return new InNode(null, null, stringValues, null, node);
+    return new InNode(null, null, stringValues, null, null, null, node);
   }
 
   public static InNode makeBinaryInExpr(TreeNode node, Set<byte[]> binaryValues) {
-    return new InNode(null, null, null, binaryValues, node);
+    return new InNode(null, null, null, binaryValues, null, null, node);
   }
 
   @Override
@@ -78,6 +90,16 @@ public class InNode implements TreeNode {
       longValues.stream().forEach(val -> longConstants.addLongValues(GandivaTypes.LongNode.newBuilder()
               .setValue(val).build()));
       inNode.setLongValues(longConstants.build());
+    } else if (floatValues != null) {
+      GandivaTypes.FloatConstants.Builder floatConstants = GandivaTypes.FloatConstants.newBuilder();
+      floatValues.stream().forEach(val -> floatConstants.addFloatValues(GandivaTypes.FloatNode.newBuilder()
+              .setValue(val).build()));
+      inNode.setFloatValues(floatConstants.build());
+    } else if (doubleValues != null) {
+      GandivaTypes.DoubleConstants.Builder doubleConstants = GandivaTypes.DoubleConstants.newBuilder();
+      doubleValues.stream().forEach(val -> doubleConstants.addDoubleValues(GandivaTypes.DoubleNode.newBuilder()
+              .setValue(val).build()));
+      inNode.setDoubleValues(doubleConstants.build());
     } else if (stringValues != null) {
       GandivaTypes.StringConstants.Builder stringConstants = GandivaTypes.StringConstants
               .newBuilder();
