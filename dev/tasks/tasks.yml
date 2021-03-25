@@ -83,7 +83,6 @@ groups:
 
   gandiva:
     - gandiva-jar-trusty
-    - gandiva-jar-osx
 
   homebrew:
     - homebrew-cpp
