@@ -92,9 +92,9 @@ void Engine::InitOnce() {
 /// factory method to construct the engine.
 Status Engine::Make(std::shared_ptr<Configuration> config,
                     std::unique_ptr<Engine>* engine) {
-  static auto host_cpu_name = llvm::sys::getHostCPUName();
+  auto host_cpu_name = llvm::sys::getHostCPUName();
   std::cout << "Host cpu name:\n"
-  std::cout << host_cpu_name << std::endl;
+  std::cout << host_cpu_name.str() << std::endl;
   std::cout << "-----------------\n"
   std::unique_ptr<Engine> engine_obj(new Engine());
 
