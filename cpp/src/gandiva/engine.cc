@@ -133,9 +133,13 @@ Status Engine::Make(const std::shared_ptr<Configuration>& conf,
   // ExecutionEngine but only for the lifetime of the builder. Found by
   // inspecting LLVM sources.
   std::string builder_error;
+  auto cpuname = llvm::sys::getHostCPUName();
+  std::cout << "CPU Name\n";
+  std::cout << cpuname.str() << std::endl;
+  std::cout << "-------------\n";
   std::unique_ptr<llvm::ExecutionEngine> exec_engine{
       llvm::EngineBuilder(std::move(module))
-          .setMCPU(llvm::sys::getHostCPUName())
+          .setMCPU(cpuname)
           .setEngineKind(llvm::EngineKind::JIT)
           .setOptLevel(opt_level)
           .setErrorStr(&builder_error)
