@@ -93,6 +93,9 @@ void Engine::InitOnce() {
 Status Engine::Make(std::shared_ptr<Configuration> config,
                     std::unique_ptr<Engine>* engine) {
   static auto host_cpu_name = llvm::sys::getHostCPUName();
+  std::cout << "Host cpu name:\n"
+  std::cout << host_cpu_name << std::endl;
+  std::cout << "-----------------\n"
   std::unique_ptr<Engine> engine_obj(new Engine());
 
   std::call_once(init_once_flag, [&engine_obj] { engine_obj->InitOnce(); });
