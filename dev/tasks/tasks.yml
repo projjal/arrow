@@ -57,7 +57,6 @@ groups:
     - centos-7
   gandiva:
     - gandiva-jar-trusty
-    - gandiva-jar-osx
 
 tasks:
   # arbitrary_task_name:
