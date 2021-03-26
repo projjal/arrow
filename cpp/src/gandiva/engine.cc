@@ -135,7 +135,6 @@ Status Engine::Make(const std::shared_ptr<Configuration>& conf,
   std::string builder_error;
   std::unique_ptr<llvm::ExecutionEngine> exec_engine{
       llvm::EngineBuilder(std::move(module))
-          .setMCPU(llvm::sys::getHostCPUName())
           .setEngineKind(llvm::EngineKind::JIT)
           .setOptLevel(opt_level)
           .setErrorStr(&builder_error)
