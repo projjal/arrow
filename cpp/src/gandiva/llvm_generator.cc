@@ -1004,6 +1004,12 @@ void LLVMGenerator::Visitor::Visit(const InExprDexBase<int32_t>& dex) {
 void LLVMGenerator::Visitor::Visit(const InExprDexBase<int64_t>& dex) {
   VisitInExpression<int64_t>(dex);
 }
+void LLVMGenerator::Visitor::Visit(const InExprDexBase<float>& dex) {
+  VisitInExpression<float>(dex);
+}
+void LLVMGenerator::Visitor::Visit(const InExprDexBase<double>& dex) {
+  VisitInExpression<double>(dex);
+}
 
 void LLVMGenerator::Visitor::Visit(const InExprDexBase<std::string>& dex) {
   VisitInExpression<std::string>(dex);
