@@ -219,8 +219,10 @@ message InNode {
   optional TreeNode node = 1;
   optional IntConstants intValues = 2;
   optional LongConstants longValues = 3;
-  optional StringConstants stringValues = 4;
-  optional BinaryConstants binaryValues = 5;
+  optional FloatConstants floatValues = 4;
+  optional DoubleConstants doubleValues = 5;
+  optional StringConstants stringValues = 6;
+  optional BinaryConstants binaryValues = 7;
 }
 
 message IntConstants {
@@ -229,6 +231,14 @@ message IntConstants {
 
 message LongConstants {
   repeated LongNode longValues = 1;
+}
+
+message FloatConstants {
+  repeated FloatNode floatValues = 1;
+}
+
+message DoubleConstants {
+  repeated DoubleNode doubleValues = 1;
 }
 
 message StringConstants {

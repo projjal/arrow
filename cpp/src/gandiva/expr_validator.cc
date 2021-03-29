@@ -156,6 +156,14 @@ Status ExprValidator::Visit(const InExpressionNode<int64_t>& node) {
   return ValidateInExpression(node.values().size(), node.eval_expr()->return_type(),
                               arrow::int64());
 }
+Status ExprValidator::Visit(const InExpressionNode<float>& node) {
+  return ValidateInExpression(node.values().size(), node.eval_expr()->return_type(),
+                              arrow::float32());
+}
+Status ExprValidator::Visit(const InExpressionNode<double>& node) {
+  return ValidateInExpression(node.values().size(), node.eval_expr()->return_type(),
+                              arrow::float64());
+}
 
 Status ExprValidator::Visit(const InExpressionNode<std::string>& node) {
   return ValidateInExpression(node.values().size(), node.eval_expr()->return_type(),
