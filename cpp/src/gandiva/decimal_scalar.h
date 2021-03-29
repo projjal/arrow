@@ -55,3 +55,19 @@ class DecimalScalar128 : public BasicDecimalScalar128 {
 };
 
 }  // namespace gandiva
+
+namespace std {
+template <>
+struct hash<gandiva::DecimalScalar128> {
+  std::size_t operator()(gandiva::DecimalScalar128 const& s) const noexcept {
+    arrow::BasicDecimal128 dvalue(s.value());
+    std::size_t h0 = std::hash<int64_t>{}(dvalue.high_bits());
+    std::size_t h1 = std::hash<uint64_t>{}(dvalue.low_bits());
+
+    std::size_t h2 = std::hash<int32_t>{}(s.precision());
+    std::size_t h3 = std::hash<int32_t>{}(s.scale());
+
+    return (((h0 ^ (h1 << 1) >> 1) ^ (h2 << 1) >> 1) ^ h3 << 1);
+  }
+};
+}  // namespace std

@@ -39,6 +39,7 @@ import org.apache.arrow.gandiva.expression.TreeNode;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
+import org.apache.arrow.vector.DecimalVector;
 import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.ValueVector;
@@ -1202,6 +1203,56 @@ public class ProjectorTest extends BaseEvaluatorTest {
                     numRows,
                     Lists.newArrayList(fieldNode, fieldNode),
                     Lists.newArrayList(c1Validity, c1Data, c2Validity));
+
+    BitVector bitVector = new BitVector(EMPTY_SCHEMA_PATH, allocator);
+    bitVector.allocateNew(numRows);
+
+    List<ValueVector> output = new ArrayList<ValueVector>();
+    output.add(bitVector);
+    eval.evaluate(batch, output);
+
+    for (int i = 1; i < 5; i++) {
+      assertTrue(bitVector.getObject(i).booleanValue());
+    }
+    for (int i = 5; i < 16; i++) {
+      assertFalse(bitVector.getObject(i).booleanValue());
+    }
+
+    releaseRecordBatch(batch);
+    releaseValueVectors(output);
+    eval.close();
+  }
+
+  @Test
+  public void testInExprDecimal() throws GandivaException, Exception {
+    Integer precision = 26;
+    Integer scale = 5;
+    ArrowType.Decimal decimal = new ArrowType.Decimal(precision, scale, 128);
+    Field c1 = Field.nullable("c1", decimal);
+
+    String[] values = new String[]{"1", "2", "3", "4", "5", "15", "16"};
+    TreeNode inExpr =
+            TreeBuilder.makeInExpressionDecimal(TreeBuilder.makeField(c1),
+                    decimalSet(values, scale), precision, scale);
+    ExpressionTree expr = TreeBuilder.makeExpression(inExpr,
+            Field.nullable("result", boolType));
+    Schema schema = new Schema(Lists.newArrayList(c1));
+    Projector eval = Projector.make(schema, Lists.newArrayList(expr));
+
+    int numRows = 16;
+    byte[] validity = new byte[]{(byte) 255, 0};
+    String[] c1Values =
+            new String[]{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"};
+
+    DecimalVector c1Data = decimalVector(c1Values, precision, scale);
+    ArrowBuf c1Validity = buf(validity);
+
+    ArrowFieldNode fieldNode = new ArrowFieldNode(numRows, 0);
+    ArrowRecordBatch batch =
+            new ArrowRecordBatch(
+                    numRows,
+                    Lists.newArrayList(fieldNode, fieldNode),
+                    Lists.newArrayList(c1Validity, c1Data.getDataBuffer(), c1Data.getValidityBuffer()));
 
     BitVector bitVector = new BitVector(EMPTY_SCHEMA_PATH, allocator);
     bitVector.allocateNew(numRows);
