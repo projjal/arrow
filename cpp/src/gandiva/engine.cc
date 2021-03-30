@@ -129,6 +129,20 @@ Status Engine::Make(const std::shared_ptr<Configuration>& conf,
 
   auto opt_level =
       conf->optimize() ? llvm::CodeGenOpt::Aggressive : llvm::CodeGenOpt::None;
+
+  llvm::StringMap<bool> host_features;
+  llvm::SmallVector<std::string, 10> attrs;
+  if (llvm::sys::getHostCPUFeatures(host_features)) {
+    for (auto& f : host_features) {
+      std::string attr = f.second ? std::string("+") + f.first().str() :
+                          std::string("-") + f.first().str();
+      attrs.push_back(attr);
+      // print
+      std::cout << attr << std::endl;
+      //
+    }
+  }
+
   // Note that the lifetime of the error string is not captured by the
   // ExecutionEngine but only for the lifetime of the builder. Found by
   // inspecting LLVM sources.
@@ -136,6 +150,7 @@ Status Engine::Make(const std::shared_ptr<Configuration>& conf,
   std::unique_ptr<llvm::ExecutionEngine> exec_engine{
       llvm::EngineBuilder(std::move(module))
           .setMCPU(llvm::sys::getHostCPUName())
+          .setMAttrs(attrs)
           .setEngineKind(llvm::EngineKind::JIT)
           .setOptLevel(opt_level)
           .setErrorStr(&builder_error)
