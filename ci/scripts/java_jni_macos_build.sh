@@ -30,17 +30,17 @@ rm -rf ${build_dir}
 
 echo "=== Building Arrow C++ libraries ==="
 : ${ARROW_BUILD_TESTS:=ON}
-: ${ARROW_DATASET:=ON}
-: ${ARROW_FILESYSTEM:=ON}
+: ${ARROW_DATASET:=OFF}
+: ${ARROW_FILESYSTEM:=OFF}
 : ${ARROW_GANDIVA_JAVA:=ON}
 : ${ARROW_GANDIVA:=ON}
-: ${ARROW_ORC:=ON}
-: ${ARROW_PARQUET:=ON}
-: ${ARROW_PLASMA_JAVA_CLIENT:=ON}
-: ${ARROW_PLASMA:=ON}
+: ${ARROW_ORC:=OFF}
+: ${ARROW_PARQUET:=OFF}
+: ${ARROW_PLASMA_JAVA_CLIENT:=OFF}
+: ${ARROW_PLASMA:=OFF}
 : ${ARROW_PYTHON:=OFF}
 : ${CMAKE_BUILD_TYPE:=Release}
-: ${CMAKE_UNITY_BUILD:=ON}
+: ${CMAKE_UNITY_BUILD:=OFF}
 
 export ARROW_TEST_DATA="${arrow_dir}/testing/data"
 export PARQUET_TEST_DATA="${arrow_dir}/cpp/submodules/parquet-testing/data"
@@ -94,21 +94,15 @@ popd
 echo "=== Copying libraries to the distribution folder ==="
 mkdir -p "${dist_dir}"
 cp -L ${build_dir}/lib/libgandiva_jni.dylib ${dist_dir}
-cp -L ${build_dir}/lib/libarrow_dataset_jni.dylib ${dist_dir}
-cp -L ${build_dir}/lib/libarrow_orc_jni.dylib ${dist_dir}
 
 echo "=== Checking shared dependencies for libraries ==="
 
 pushd ${dist_dir}
 archery linking check-dependencies \
-  --allow libarrow_dataset_jni \
-  --allow libarrow_orc_jni \
   --allow libc++ \
   --allow libgandiva_jni \
   --allow libncurses \
   --allow libSystem \
   --allow libz \
-  libgandiva_jni.dylib \
-  libarrow_dataset_jni.dylib \
-  libarrow_orc_jni.dylib
+  libgandiva_jni.dylib
 popd
