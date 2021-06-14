@@ -19,6 +19,8 @@
 
 {{ macros.github_header() }}
 
+# arrow_head: {{ arrow.head }}
+
 jobs:
 
   build-cpp-ubuntu:
@@ -86,11 +88,7 @@ jobs:
           tar -xvzf arrow-shared-libs-linux.tar.gz
       - name: Test that Shared Libraries Exist
         run: |
-          test -f arrow/java/dist/libarrow_dataset_jni.dylib
           test -f arrow/java/dist/libgandiva_jni.dylib
-          test -f arrow/java/dist/libarrow_orc_jni.dylib
-          test -f arrow/java/dist/libarrow_dataset_jni.so
-          test -f arrow/java/dist/libarrow_orc_jni.so
           test -f arrow/java/dist/libgandiva_jni.so
       - name: Build Bundled Jar
         run: |

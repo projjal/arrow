@@ -28,7 +28,9 @@ export ARROW_TEST_DATA=${arrow_dir}/testing/data
 pushd ${arrow_dir}/java
 
 # build the entire project
-mvn clean install -P arrow-jni -Darrow.cpp.build.dir=$cpp_lib_dir
+mvn clean install -DskipTests -P arrow-jni -Darrow.cpp.build.dir=$cpp_lib_dir
+# test only gandiva
+mvn test -P arrow-jni -pl gandiva -Dgandiva.cpp.build.dir=$cpp_lib_dir
 
 # copy all jars and pom files to the distribution folder
 find . -name "*.jar" -exec echo {} \; -exec cp {} $java_dist_dir \;

@@ -29,20 +29,20 @@ echo "=== Clear output directories and leftovers ==="
 rm -rf ${build_dir}
 
 echo "=== Building Arrow C++ libraries ==="
-: ${ARROW_DATASET:=ON}
+: ${ARROW_DATASET:=OFF}
 : ${ARROW_GANDIVA:=ON}
 : ${ARROW_GANDIVA_JAVA:=ON}
-: ${ARROW_FILESYSTEM:=ON}
+: ${ARROW_FILESYSTEM:=OFF}
 : ${ARROW_JEMALLOC:=ON}
 : ${ARROW_RPATH_ORIGIN:=ON}
-: ${ARROW_ORC:=ON}
-: ${ARROW_PARQUET:=ON}
-: ${ARROW_PLASMA:=ON}
-: ${ARROW_PLASMA_JAVA_CLIENT:=ON}
+: ${ARROW_ORC:=OFF}
+: ${ARROW_PARQUET:=OFF}
+: ${ARROW_PLASMA:=OFF}
+: ${ARROW_PLASMA_JAVA_CLIENT:=OFF}
 : ${ARROW_PYTHON:=OFF}
 : ${ARROW_BUILD_TESTS:=ON}
 : ${CMAKE_BUILD_TYPE:=Release}
-: ${CMAKE_UNITY_BUILD:=ON}
+: ${CMAKE_UNITY_BUILD:=OFF}
 : ${VCPKG_FEATURE_FLAGS:=-manifests}
 : ${VCPKG_TARGET_TRIPLET:=${VCPKG_DEFAULT_TRIPLET:-x64-linux-static-${CMAKE_BUILD_TYPE}}}
 : ${GANDIVA_CXX_FLAGS:=-isystem;/opt/rh/devtoolset-9/root/usr/include/c++/9;-isystem;/opt/rh/devtoolset-9/root/usr/include/c++/9/x86_64-redhat-linux;-isystem;-lpthread}
@@ -69,7 +69,6 @@ cmake \
   -DARROW_GANDIVA=${ARROW_GANDIVA} \
   -DARROW_GRPC_USE_SHARED=OFF \
   -DARROW_JEMALLOC=${ARROW_JEMALLOC} \
-  -DARROW_JNI=ON \
   -DARROW_LZ4_USE_SHARED=OFF \
   -DARROW_OPENSSL_USE_SHARED=OFF \
   -DARROW_ORC=${ARROW_ORC} \
@@ -107,8 +106,6 @@ popd
 echo "=== Copying libraries to the distribution folder ==="
 mkdir -p "${dist_dir}"
 cp -L ${build_dir}/lib/libgandiva_jni.so ${dist_dir}
-cp -L ${build_dir}/lib/libarrow_dataset_jni.so ${dist_dir}
-cp -L ${build_dir}/lib/libarrow_orc_jni.so ${dist_dir}
 
 echo "=== Checking shared dependencies for libraries ==="
 
@@ -124,7 +121,5 @@ archery linking check-dependencies \
   --allow libstdc++ \
   --allow libz \
   --allow linux-vdso \
-  libgandiva_jni.so \
-  libarrow_dataset_jni.so \
-  libarrow_orc_jni.so
+  libgandiva_jni.so
 popd
